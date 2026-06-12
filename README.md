@@ -4,14 +4,38 @@ A simple terminal time tracker inspired by Emacs org-mode clocking.
 Projects contain tasks; tasks accumulate `CLOCK:` entries. Everything is
 stored in a plain-text, org-like file you can edit by hand.
 
-## Run
+## Setup
 
 ```
-orgtime.bat                 # opens timelog.org in this directory
+git clone https://github.com/kellyre/orgtime.git
+cd orgtime
+python -m venv venv
+```
+
+Windows:
+```
+venv\Scripts\pip install -r requirements.txt
+```
+Mac/Linux:
+```
+venv/bin/pip install -r requirements.txt
+```
+
+## Run
+
+Windows:
+```
+orgtime.bat
 orgtime.bat path\to\file.org
 ```
 
-(or `venv\Scripts\python -m orgtime [file]`)
+Mac/Linux:
+```
+venv/bin/python -m orgtime
+venv/bin/python -m orgtime path/to/file.org
+```
+
+Without a file argument, opens (or creates) `timelog.org` in the current directory.
 
 ## Keys
 
