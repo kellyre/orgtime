@@ -1,0 +1,134 @@
+"""UI-agnostic view helpers shared by the curses front-end.
+
+This module deliberately imports neither ``curses`` nor ``textual`` so it
+can be unit-tested anywhere.  It turns a :class:`~orgtime.model.Document`
+into a flat list of display rows (respecting collapse state) and builds the
+plain-text label for each row.  The curses layer adds colour on top.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime
+
+from .model import (
+    ClockEntry,
+    Document,
+    Project,
+    Task,
+    clock_warnings,
+    format_duration,
+    human_duration,
+)
+
+PROJECT, TASK, CLOCK, COMMENT = "project", "task", "clock", "comment"
+
+
+class CommentRef:
+    """Marker tying a displayed comment line back to its owning item.
+
+    Every line of one comment block shares a CommentRef for the same owner,
+    so edit/delete on any line acts on the whole adjoining block.
+    """
+
+    def __init__(self, owner: Project | Task | ClockEntry) -> None:
+        self.owner = owner
+
+
+@dataclass
+class Row:
+    obj: object          # Project | Task | ClockEntry | CommentRef
+    kind: str
+    depth: int
+    text: str            # plain-text label (indentation already applied)
+    warn: bool = False    # implausible clock entry?
+    running: bool = False  # a running clock?
+
+
+def _indent(depth: int) -> str:
+    return "  " * depth
+
+
+def project_text(project: Project, now: datetime) -> str:
+    marker = "+" if project.collapsed else "-"
+    total = project.total_time(now)
+    time_part = f"  {human_duration(total)}" if total else ""
+    n = len(project.tasks)
+    return (f"{marker} #{project.priority} {project.name}  "
+            f"({n} task{'s' if n != 1 else ''}){time_part}")
+
+
+def task_text(task: Task, now: datetime) -> str:
+    marker = "+" if (task.collapsed and (task.comments or task.clocks)) else "-"
+    total = task.total_time(now)
+    time_part = f"  {human_duration(total)}" if total else ""
+    run = "  *RUNNING*" if task.running_clock() else ""
+    return (f"{_indent(1)}{marker} {task.status} #{task.priority} "
+            f"{task.name}{time_part}{run}")
+
+
+def clock_text(clock: ClockEntry, now: datetime) -> str:
+    from .model import format_ts
+    warn = "  !" if clock_warnings(clock, now) else ""
+    if clock.running:
+        return (f"{_indent(2)}CLOCK: {format_ts(clock.start)}--... "
+                f"running {human_duration(clock.duration(now))}{warn}")
+    return (f"{_indent(2)}CLOCK: {format_ts(clock.start)}--"
+            f"{format_ts(clock.end)} => {format_duration(clock.duration())}{warn}")
+
+
+def comment_text(text: str, depth: int) -> str:
+    return f"{_indent(depth)}# {text}" if text else f"{_indent(depth)}#"
+
+
+def flatten(doc: Document, now: datetime | None = None) -> list[Row]:
+    """Walk the document into visible rows, honouring collapse state.
+
+    Project.collapsed hides everything beneath it; Task.collapsed hides the
+    task's comments, clock entries, and clock-attached comments.
+    """
+    now = now or datetime.now()
+    rows: list[Row] = []
+
+    def add_comments(owner, depth: int) -> None:
+        ref = CommentRef(owner)
+        for text in owner.comments:
+            rows.append(Row(ref, COMMENT, depth, comment_text(text, depth)))
+
+    for project in doc.projects:
+        rows.append(Row(project, PROJECT, 0, project_text(project, now)))
+        if project.collapsed:
+            continue
+        add_comments(project, 1)
+        for task in project.tasks:
+            warn = any(clock_warnings(c, now) for c in task.clocks)
+            rows.append(Row(task, TASK, 1, task_text(task, now),
+                            running=task.running_clock() is not None, warn=warn))
+            if task.collapsed:
+                continue
+            add_comments(task, 2)
+            for clock in task.clocks:
+                rows.append(Row(clock, CLOCK, 2, clock_text(clock, now),
+                                warn=bool(clock_warnings(clock, now)),
+                                running=clock.running))
+                add_comments(clock, 3)
+    return rows
+
+
+HELP_LINES = [
+    "orgtime (curses)  —  keys",
+    "",
+    "  Up/Down, j/k     move cursor      Home/End, g/G  top/bottom",
+    "  Enter / Space    collapse/expand  Tab            collapse/expand",
+    "  N                new project      n              new task",
+    "  e                edit item        d              delete (soft)",
+    "  m                add/edit comment X              expunge ## lines",
+    "  i / o            clock in / out   I / O          clock in/out at time",
+    "  t                cycle status     1-5            set priority",
+    "  u / Ctrl+R       undo / redo      c              consistency check",
+    "  r                reload file      q              quit (saves)",
+    "  ?                this help",
+    "",
+    "  Deletes are soft: lines get ## prepended and stay in the file.",
+    "  Press any key to close this help.",
+]

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Launch the curses (no-dependency) version of orgtime.
+# Optional arg: path to a .org file (defaults to timelog.org).
+exec python3 -m orgtime.curses_app "$@"
