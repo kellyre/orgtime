@@ -284,7 +284,7 @@ class CursesApp:
             self.set_priority(int(ch))
         elif ch == "u":
             self.action_undo()
-        elif ch == "\x12":  # Ctrl+R
+        elif ch in ("\x12", 18):  # Ctrl+R (str from get_wch, int from getch)
             self.action_redo()
         elif ch == "c":
             self.check()

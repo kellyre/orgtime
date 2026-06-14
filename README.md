@@ -8,11 +8,11 @@ Two front-ends share the same file format and model:
 
 - **Textual** (`python -m orgtime`) — the full-featured UI; needs the
   `textual` package.
-- **curses** (`python -m orgtime.curses_app`) — a standard-library-only
-  alternative for locked-down environments where `textual` isn't available.
-  Same functionality, plainer presentation. Requires no third-party
-  packages (curses ships with Python on Linux/macOS; on Windows it needs
-  `windows-curses`, so this front-end targets Unix-like systems).
+- **curses** (`python -m orgtime.curses_app`) — an alternative for
+  locked-down environments where `textual` isn't available. Same
+  functionality, plainer presentation. `curses` ships with Python on
+  Linux/macOS (no third-party packages at all); on Windows it needs the
+  `windows-curses` shim (`pip install -r requirements-curses.txt`).
 
 ## Setup
 
@@ -47,16 +47,25 @@ venv/bin/python -m orgtime path/to/file.org
 
 Without a file argument, opens (or creates) `timelog.org` in the current directory.
 
-### curses front-end (no third-party dependencies)
+### curses front-end (for environments without `textual`)
 
-For environments without `textual`, skip the install step entirely and run:
+On Linux/macOS, skip the install step entirely — just run:
 
 ```
 python3 -m orgtime.curses_app
 python3 -m orgtime.curses_app path/to/file.org
 ```
 
-(or `./orgtime-curses [file]`). It needs only the Python standard library.
+(or `./orgtime-curses [file]`).
+
+On Windows, install the curses shim once, then use the launcher:
+
+```
+venv\Scripts\pip install -r requirements-curses.txt
+orgtime-curses.bat
+orgtime-curses.bat path\to\file.org
+```
+
 Keys match the table below, with two differences forced by the terminal:
 **`u`** undoes and **`Ctrl+R`** redoes (terminals reserve `Ctrl+Z`), and
 multi-line editors (description, comments) save with **`Ctrl+G`**. Press
