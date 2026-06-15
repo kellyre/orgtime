@@ -107,12 +107,23 @@ def _scenario(stdscr):
         assert app.doc.running() is None
         assert len(task.clocks) == 1 and not task.clocks[0].running
 
-        # -- comment on the task via real textpad editor -----------------
+        # -- comment on the task via the real multi-line editor ----------
+        # newline typed between the two lines (Enter), saved with Ctrl+G
         select(app, task)
-        KEYS.extend(chars("first") + [ctrl("J")] + chars("second") + [ctrl("G")])
+        KEYS.extend(chars("first") + ["\n"] + chars("second") + ["\x07"])
         app.handle_key("m")
         assert task.comments == ["first", "second"], task.comments
         app.draw()
+
+        # -- regression: insert a newline in the MIDDLE of existing text --
+        # start "helloworld", Home, Right x5 (between hello|world), Enter, save
+        KEYS.extend([curses.KEY_HOME] + [curses.KEY_RIGHT] * 5 + ["\n", "\x07"])
+        out = app.edit_multiline("split test", "helloworld")
+        assert out == "hello\nworld", repr(out)
+        # and Backspace at column 0 joins lines back together
+        KEYS.extend([curses.KEY_HOME, curses.KEY_BACKSPACE, "\x07"])
+        out = app.edit_multiline("join test", "hello\nworld")
+        assert out == "helloworld", repr(out)
 
         # -- status cycle + priority key ---------------------------------
         select(app, task)

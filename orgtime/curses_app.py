@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import copy
 import curses
-import curses.textpad
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -680,45 +679,131 @@ class CursesApp:
         return result
 
     def edit_multiline(self, title: str, initial: str = "") -> str | None:
-        """Multi-line editor backed by curses.textpad.Textbox.
+        """Full multi-line text editor.
 
-        Ctrl+G saves, Esc cancels (returns None).
+        Maintains a list of lines and a (row, col) cursor so that Enter
+        splits the current line at the cursor (inserting a blank line in the
+        middle works), Backspace joins with the previous line at column 0,
+        etc.  Ctrl+G saves, Esc cancels (returns None).
+
+        This replaces curses.textpad.Textbox, which is a fixed character
+        grid and cannot insert a newline in the middle of existing text.
         """
         maxy, maxx = self.stdscr.getmaxyx()
-        height = min(maxy - 4, 12)
-        width = min(maxx - 4, 70)
+        height = min(maxy - 4, 16)
+        width = min(maxx - 4, 74)
         y = max(0, (maxy - height) // 2)
         x = max(0, (maxx - width) // 2)
-        frame = curses.newwin(height, width, y, x)
-        frame.box()
-        frame.addstr(0, 2, f" {title[: width - 6]} ")
-        frame.refresh()
+        win = curses.newwin(height, width, y, x)
+        win.keypad(True)
 
-        edit_win = curses.newwin(height - 2, width - 2, y + 1, x + 1)
-        for i, line in enumerate(initial.splitlines()[: height - 2]):
-            try:
-                edit_win.addstr(i, 0, line[: width - 3])
-            except curses.error:
-                pass
-        box = curses.textpad.Textbox(edit_win, insert_mode=True)
-        cancelled = {"v": False}
+        inner_h = height - 2          # text rows inside the box
+        inner_w = width - 2           # text cols inside the box
+        lines = initial.split("\n") or [""]
+        if not lines:
+            lines = [""]
+        cy = len(lines) - 1           # start at end of existing text
+        cx = len(lines[cy])
+        top = 0                       # first visible line (vertical scroll)
 
-        def validate(ch):
-            if ch == 27:            # Esc
-                cancelled["v"] = True
-                return 7            # Ctrl+G terminates
-            if ch in (curses.KEY_BACKSPACE, 127, 8):
-                return 8            # Textbox uses Ctrl+H for backspace
-            return ch
+        def is_enter(ch):
+            return ch in ("\n", "\r", curses.KEY_ENTER, 10, 13)
+
+        def is_backspace(ch):
+            return ch in (curses.KEY_BACKSPACE, "\x7f", "\b", "\x08", 127, 8)
+
+        def is_save(ch):
+            return ch in ("\x07", 7)        # Ctrl+G
+
+        def is_cancel(ch):
+            return ch in ("\x1b", 27)       # Esc
 
         curses.curs_set(1)
         try:
-            text = box.edit(validate)
+            while True:
+                # keep cursor visible (vertical) and compute horizontal scroll
+                top = max(min(top, cy), cy - inner_h + 1, 0)
+                left = 0
+                if cx >= inner_w:
+                    left = cx - inner_w + 1
+
+                win.erase()
+                win.box()
+                win.addstr(0, 2, f" {title[: width - 6]} ")
+                hint = "Enter: newline  Ctrl+G: save  Esc: cancel"
+                try:
+                    win.addstr(height - 1, 2, hint[: width - 4])
+                except curses.error:
+                    pass
+                for i in range(inner_h):
+                    li = top + i
+                    if li >= len(lines):
+                        break
+                    seg = lines[li][left: left + inner_w]
+                    try:
+                        win.addstr(1 + i, 1, seg)
+                    except curses.error:
+                        pass
+                win.move(1 + (cy - top), 1 + (cx - left))
+                win.refresh()
+
+                ch = win.get_wch()
+                if is_cancel(ch):
+                    return None
+                if is_save(ch):
+                    return "\n".join(ln.rstrip() for ln in lines)
+                if is_enter(ch):
+                    rest = lines[cy][cx:]
+                    lines[cy] = lines[cy][:cx]
+                    lines.insert(cy + 1, rest)
+                    cy, cx = cy + 1, 0
+                elif is_backspace(ch):
+                    if cx > 0:
+                        lines[cy] = lines[cy][:cx - 1] + lines[cy][cx:]
+                        cx -= 1
+                    elif cy > 0:
+                        cx = len(lines[cy - 1])
+                        lines[cy - 1] += lines[cy]
+                        del lines[cy]
+                        cy -= 1
+                elif ch == curses.KEY_DC:
+                    if cx < len(lines[cy]):
+                        lines[cy] = lines[cy][:cx] + lines[cy][cx + 1:]
+                    elif cy < len(lines) - 1:
+                        lines[cy] += lines[cy + 1]
+                        del lines[cy + 1]
+                elif ch == curses.KEY_LEFT:
+                    if cx > 0:
+                        cx -= 1
+                    elif cy > 0:
+                        cy -= 1
+                        cx = len(lines[cy])
+                elif ch == curses.KEY_RIGHT:
+                    if cx < len(lines[cy]):
+                        cx += 1
+                    elif cy < len(lines) - 1:
+                        cy += 1
+                        cx = 0
+                elif ch == curses.KEY_UP:
+                    if cy > 0:
+                        cy -= 1
+                        cx = min(cx, len(lines[cy]))
+                elif ch == curses.KEY_DOWN:
+                    if cy < len(lines) - 1:
+                        cy += 1
+                        cx = min(cx, len(lines[cy]))
+                elif ch == curses.KEY_HOME:
+                    cx = 0
+                elif ch == curses.KEY_END:
+                    cx = len(lines[cy])
+                elif ch == "\t":
+                    lines[cy] = lines[cy][:cx] + "    " + lines[cy][cx:]
+                    cx += 4
+                elif isinstance(ch, str) and ch.isprintable():
+                    lines[cy] = lines[cy][:cx] + ch + lines[cy][cx:]
+                    cx += 1
         finally:
             curses.curs_set(0)
-        if cancelled["v"]:
-            return None
-        return "\n".join(ln.rstrip() for ln in text.splitlines()).rstrip("\n")
 
     def confirm(self, message: str) -> bool:
         win = self._centered_win(5, max(40, len(message) + 6))
