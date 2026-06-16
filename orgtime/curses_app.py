@@ -29,11 +29,14 @@ from .model import (
     Document,
     Project,
     Task,
+    apply_overlap_changes,
     check_consistency,
     clock_warnings,
     comment_lines,
+    describe_change,
     format_ts,
     load,
+    overlap_changes,
     parse_user_date,
     parse_user_ts,
     tombstoned,
@@ -502,9 +505,29 @@ class CursesApp:
             if end_dt < start_dt:
                 self.message = "End is before start"
                 return
-        self.checkpoint()
-        clock.start, clock.end = start_dt, end_dt
-        self.save_and_refresh()
+        # detect/resolve overlaps with other entries (only for closed edits)
+        changes = []
+        if end_dt is not None:
+            changes = overlap_changes(self.doc, clock, start_dt, end_dt)
+        if changes:
+            lines = ["This time overlaps other entries. Proposed changes:", ""]
+            lines += [" - " + describe_change(c) for c in changes]
+            if any(c.becomes_zero for c in changes):
+                lines += ["", "Entries marked 0:00 are fully covered and will "
+                          "be kept as zero-length slots."]
+            lines += ["", "Apply these changes to remove the overlap?"]
+            if not self.confirm_list("Resolve overlaps", lines):
+                self.message = "Edit cancelled (overlap not resolved)"
+                return
+            self.checkpoint()
+            clock.start, clock.end = start_dt, end_dt
+            apply_overlap_changes(changes)
+            self.save_and_refresh()
+            self.message = f"Edited time; adjusted {len(changes)} other entry(s)"
+        else:
+            self.checkpoint()
+            clock.start, clock.end = start_dt, end_dt
+            self.save_and_refresh()
         self.warn_about(clock)
 
     def delete(self) -> None:
@@ -1019,6 +1042,36 @@ class CursesApp:
         win.refresh()
         ch = win.get_wch()
         return ch in ("y", "Y")
+
+    def confirm_list(self, title: str, lines: list[str]) -> bool:
+        """Scrollable list with a y/n prompt.  Returns True only on y."""
+        maxy, maxx = self.stdscr.getmaxyx()
+        width = min(maxx - 2, max([len(title)] + [len(s) for s in lines]) + 6)
+        width = max(width, 40)
+        height = min(maxy - 2, len(lines) + 4)
+        win = self._centered_win(height, width)
+        h, w = win.getmaxyx()
+        win.addstr(0, 2, f" {title[: w - 6]} ")
+        offset = 0
+        body = h - 3
+        while True:
+            for i in range(body):
+                win.addstr(i + 1, 2, " " * (w - 4))
+                if offset + i < len(lines):
+                    win.addstr(i + 1, 2, str(lines[offset + i])[: w - 4])
+            footer = "y = yes, n/esc = no" + (
+                "   (Up/Down scroll)" if len(lines) > body else "")
+            win.addstr(h - 1, 2, footer[: w - 4])
+            win.refresh()
+            ch = win.get_wch()
+            if ch == curses.KEY_DOWN and offset + body < len(lines):
+                offset += 1
+            elif ch == curses.KEY_UP and offset > 0:
+                offset -= 1
+            elif ch in ("y", "Y"):
+                return True
+            elif ch in ("n", "N", "\x1b"):
+                return False
 
     def show_report(self, title: str, lines, plain: bool = False) -> None:
         maxy, maxx = self.stdscr.getmaxyx()

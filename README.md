@@ -110,6 +110,18 @@ and pick with the arrow keys. Time fields accept `YYYY-MM-DD HH:MM` or just
 To fix an already-recorded interval, expand the task and press `e` on the
 CLOCK line.
 
+### Overlap resolution
+
+Because you can only do one thing at a time, two clock entries should never
+overlap. When editing a CLOCK line creates an overlap with any entry in any
+task or project, the app lists every affected entry and the change it would
+make, then applies them on confirmation (Esc/No cancels the whole edit):
+
+- an entry overlapping on one side is trimmed back to the edge;
+- an entry that fully surrounds the new interval is split into two;
+- an entry entirely covered collapses to a zero-length (`0:00`) slot — you're
+  told this will happen and it proceeds only if you confirm.
+
 ## File format
 
 ```

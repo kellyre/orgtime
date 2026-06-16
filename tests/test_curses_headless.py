@@ -15,9 +15,11 @@ import tempfile
 from collections import deque
 from pathlib import Path
 
+from datetime import datetime
+
 from orgtime import curses_app
 from orgtime.curses_app import CursesApp
-from orgtime.model import parse
+from orgtime.model import ClockEntry, Task, parse
 from orgtime.view import CommentRef
 
 KEYS: deque = deque()
@@ -145,6 +147,43 @@ def _scenario(stdscr):
         assert clock.end is not None and clock.end.year == 2099
         # a future end is implausible -> warning surfaced
         assert "WARNING" in app.message
+
+        # -- editing a time resolves overlaps with other entries ---------
+        # clean, deterministic setup: task A 09:00-10:00, temp task B 11-12
+        task.clocks.clear()
+        task.clocks.append(
+            ClockEntry(start=datetime(2026, 7, 1, 9, 0),
+                       end=datetime(2026, 7, 1, 10, 0)))
+        project.tasks.append(Task(name="Temp B"))
+        task_b = project.tasks[-1]
+        task_b.clocks.append(
+            ClockEntry(start=datetime(2026, 7, 1, 11, 0),
+                       end=datetime(2026, 7, 1, 12, 0)))
+        app.doc.save()
+        app.refresh_rows()
+        clock_a = task.clocks[0]
+        select(app, clock_a)
+        # edit end 10:00 -> 11:30 (overlaps Temp B); confirm the fix with 'y'
+        KEYS.extend(["\n"]                                   # accept start
+                    + ["\x15"] + chars("2026-07-01 11:30") + ["\n"]  # new end
+                    + ["y"])                                 # confirm overlap fix
+        app.handle_key("e")
+        assert clock_a.end == datetime(2026, 7, 1, 11, 30)
+        # Temp B was trimmed at the start to remove the overlap
+        assert task_b.clocks[0].start == datetime(2026, 7, 1, 11, 30)
+        assert task_b.clocks[0].end == datetime(2026, 7, 1, 12, 0)
+        # cancelling instead leaves everything unchanged
+        select(app, clock_a)
+        KEYS.extend(["\n"]                                   # accept start
+                    + ["\x15"] + chars("2026-07-01 11:45") + ["\n"]  # new end
+                    + ["n"])                                 # decline the fix
+        app.handle_key("e")
+        assert clock_a.end == datetime(2026, 7, 1, 11, 30)   # unchanged
+        assert task_b.clocks[0].start == datetime(2026, 7, 1, 11, 30)
+        # remove the temp task to restore the scenario state
+        project.tasks.remove(task_b)
+        app.doc.save()
+        app.refresh_rows()
 
         # -- jump to running CLOCK + collapse all ------------------------
         select(app, task)

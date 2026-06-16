@@ -6,9 +6,12 @@ from pathlib import Path
 
 from textual.widgets import Tree
 
+from datetime import datetime
+
 from orgtime.app import (
     CommentDialog,
     CommentRef,
+    ConfirmListDialog,
     EditDialog,
     MoveTaskDialog,
     OrgTimeApp,
@@ -17,7 +20,7 @@ from orgtime.app import (
     SearchDialog,
     TimeDialog,
 )
-from orgtime.model import parse
+from orgtime.model import ClockEntry, Task, parse
 
 
 def select(app, obj) -> None:
@@ -270,6 +273,32 @@ async def run() -> None:
             assert reports, "report file not written"
             body = reports[0].read_text(encoding="utf-8")
             assert "orgtime time report" in body and "By day" in body
+
+            # editing a time resolves overlaps with other entries
+            p0 = app.doc.projects[0]
+            p0.tasks.append(Task(name="OvA"))
+            p0.tasks.append(Task(name="OvB"))
+            ta, tb = p0.tasks[-2], p0.tasks[-1]
+            ta.clocks.append(ClockEntry(start=datetime(2026, 7, 1, 9, 0),
+                                        end=datetime(2026, 7, 1, 10, 0)))
+            tb.clocks.append(ClockEntry(start=datetime(2026, 7, 1, 11, 0),
+                                        end=datetime(2026, 7, 1, 12, 0)))
+            ta.collapsed = False
+            app.doc.save()
+            app.rebuild_tree()
+            await pilot.pause()
+            clock_a = ta.clocks[0]
+            select(app, clock_a)
+            await pilot.press("e")  # ClockDialog
+            app.screen.query_one("#end").value = "2026-07-01 11:30"
+            await pilot.press("ctrl+s")
+            await pilot.pause()
+            assert isinstance(app.screen, ConfirmListDialog)
+            await pilot.press("y")  # apply the overlap fix
+            await pilot.pause()
+            assert clock_a.end == datetime(2026, 7, 1, 11, 30)
+            assert tb.clocks[0].start == datetime(2026, 7, 1, 11, 30)
+            assert tb.clocks[0].end == datetime(2026, 7, 1, 12, 0)
 
             await pilot.press("q")
 

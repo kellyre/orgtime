@@ -429,6 +429,92 @@ def load(path: Path) -> tuple[Document, list[str]]:
     return doc, issues
 
 
+# -- overlap resolution -----------------------------------------------------
+
+
+@dataclass
+class ClockChange:
+    """A planned change to one existing clock entry so it no longer overlaps
+    an edited entry.  ``split_extra`` (start, end), when set, is a second
+    interval to add to the same task (the entry was split in two)."""
+
+    project: "Project"
+    task: "Task"
+    clock: "ClockEntry"
+    old_start: datetime
+    old_end: datetime
+    new_start: datetime
+    new_end: datetime
+    becomes_zero: bool
+    split_extra: tuple[datetime, datetime] | None = None
+
+
+def overlap_changes(doc: "Document", edited: "ClockEntry",
+                    new_start: datetime, new_end: datetime) -> list[ClockChange]:
+    """Plan the changes to *other* closed clock entries so none overlaps the
+    edited entry's new ``[new_start, new_end]`` interval.
+
+    - an entry that strictly contains the new interval is split in two;
+    - an entry overlapping on one side is trimmed to that side;
+    - an entry fully inside the new interval collapses to a zero-length slot
+      (flagged with ``becomes_zero``).
+
+    The edited entry itself and any running (open) entries are ignored.
+    """
+    changes: list[ClockChange] = []
+    for project in doc.projects:
+        for task in project.tasks:
+            for clock in task.clocks:
+                if clock is edited or clock.end is None:
+                    continue
+                os_, oe = clock.start, clock.end
+                if not (os_ < new_end and new_start < oe):
+                    continue  # no positive overlap
+                if os_ < new_start and new_end < oe:
+                    change = ClockChange(project, task, clock, os_, oe,
+                                         os_, new_start, False, (new_end, oe))
+                elif os_ < new_start:               # left overlap -> trim end
+                    change = ClockChange(project, task, clock, os_, oe,
+                                         os_, new_start, False, None)
+                elif new_end < oe:                  # right overlap -> trim start
+                    change = ClockChange(project, task, clock, os_, oe,
+                                         new_end, oe, False, None)
+                else:                               # fully inside -> collapse
+                    change = ClockChange(project, task, clock, os_, oe,
+                                         os_, os_, True, None)
+                changes.append(change)
+    changes.sort(key=lambda c: c.old_start)
+    return changes
+
+
+def apply_overlap_changes(changes: list[ClockChange]) -> None:
+    """Apply a plan produced by :func:`overlap_changes` in place."""
+    for change in changes:
+        change.clock.start = change.new_start
+        change.clock.end = change.new_end
+        if change.split_extra is not None:
+            start, end = change.split_extra
+            extra = ClockEntry(start=start, end=end)
+            idx = change.task.clocks.index(change.clock)
+            change.task.clocks.insert(idx + 1, extra)
+
+
+def describe_change(change: ClockChange) -> str:
+    def short(dt: datetime) -> str:
+        return dt.strftime("%Y-%m-%d %H:%M")
+
+    head = (f"{change.project.name} / {change.task.name}: "
+            f"{short(change.old_start)}--{short(change.old_end)} -> ")
+    if change.split_extra is not None:
+        s2, e2 = change.split_extra
+        return (head + f"split into {short(change.new_start)}--{short(change.new_end)}"
+                f" and {short(s2)}--{short(e2)}")
+    if change.becomes_zero:
+        return head + f"{short(change.new_start)}--{short(change.new_end)} "\
+                      f"(0:00, fully covered)"
+    return head + f"{short(change.new_start)}--{short(change.new_end)}"
+
+
 # -- consistency check ------------------------------------------------------
 
 

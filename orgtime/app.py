@@ -32,13 +32,16 @@ from .model import (
     Document,
     Project,
     Task,
+    apply_overlap_changes,
     check_consistency,
     clock_warnings,
     comment_lines,
+    describe_change,
     format_duration,
     format_ts,
     human_duration,
     load,
+    overlap_changes,
     parse_user_date,
     parse_user_ts,
     tombstoned,
@@ -354,6 +357,35 @@ class ConfirmDialog(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         with Vertical(id="dialog"):
             yield Label(self._message, id="dialog-title")
+            with Horizontal(id="dialog-buttons"):
+                yield Button("Yes (y)", variant="error", id="yes")
+                yield Button("No (n)", id="no")
+
+    @on(Button.Pressed)
+    def pressed(self, event: Button.Pressed) -> None:
+        self.dismiss(event.button.id == "yes")
+
+
+class ConfirmListDialog(ModalScreen[bool]):
+    """Confirmation that shows a scrollable list of lines (e.g. overlap fixes)."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss(False)", "Cancel"),
+        Binding("y", "dismiss(True)", "Yes"),
+        Binding("n", "dismiss(False)", "No"),
+    ]
+
+    def __init__(self, title: str, lines: list[str]) -> None:
+        super().__init__()
+        self._title = title
+        self._lines = lines
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="report"):
+            yield Label(self._title, id="dialog-title")
+            with VerticalScroll():
+                for line in self._lines:
+                    yield Static(escape(line))
             with Horizontal(id="dialog-buttons"):
                 yield Button("Yes (y)", variant="error", id="yes")
                 yield Button("No (n)", id="no")
@@ -815,11 +847,39 @@ class OrgTimeApp(App):
             self._open_comment_dialog(obj.owner)
         elif isinstance(obj, ClockEntry):
             def done_clock(result: dict | None) -> None:
-                if result:
+                if not result:
+                    return
+                start, end = result["start"], result["end"]
+                changes = []
+                if end is not None:
+                    changes = overlap_changes(self.doc, obj, start, end)
+                if not changes:
                     self.checkpoint()
-                    obj.start, obj.end = result["start"], result["end"]
+                    obj.start, obj.end = start, end
                     self.save_and_refresh()
                     self.warn_about(obj)
+                    return
+
+                lines = ["This time overlaps other entries. Proposed changes:", ""]
+                lines += [f"• {describe_change(c)}" for c in changes]
+                if any(c.becomes_zero for c in changes):
+                    lines += ["", "Entries marked 0:00 are fully covered and kept "
+                              "as zero-length slots."]
+                lines += ["", "Apply these changes to remove the overlap?"]
+
+                def confirmed(ok: bool) -> None:
+                    if not ok:
+                        self.notify("Edit cancelled (overlap not resolved)",
+                                    severity="warning")
+                        return
+                    self.checkpoint()
+                    obj.start, obj.end = start, end
+                    apply_overlap_changes(changes)
+                    self.save_and_refresh()
+                    self.notify(f"Edited time; adjusted {len(changes)} entry(s)")
+                    self.warn_about(obj)
+                self.push_screen(ConfirmListDialog("Resolve overlaps", lines),
+                                 confirmed)
             self.push_screen(ClockDialog(obj), done_clock)
         elif isinstance(obj, (Project, Task)):
             def done(result: dict | None) -> None:
