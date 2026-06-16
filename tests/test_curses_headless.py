@@ -125,10 +125,12 @@ def _scenario(stdscr):
         out = app.edit_multiline("join test", "hello\nworld")
         assert out == "helloworld", repr(out)
 
-        # -- status cycle + priority key ---------------------------------
+        # -- status cycle (both directions) + priority key ---------------
         select(app, task)
         app.handle_key("t")  # IN-PROGRESS -> HOLD
         assert task.status == "HOLD"
+        app.handle_key("T")  # HOLD -> IN-PROGRESS (reverse)
+        assert task.status == "IN-PROGRESS"
         app.handle_key("2")
         assert task.priority == 2
 
@@ -144,16 +146,31 @@ def _scenario(stdscr):
         # a future end is implausible -> warning surfaced
         assert "WARNING" in app.message
 
-        # -- jump to running + collapse all ------------------------------
+        # -- jump to running CLOCK + collapse all ------------------------
         select(app, task)
         app.handle_key("i")  # start a running clock on the task
-        assert app.doc.running() is not None
+        _, _, running_clock = app.doc.running()
         app.handle_key("C")  # collapse all projects
         assert all(p.collapsed for p in app.doc.projects)
-        app.handle_key("J")  # jump to running -> expands project, selects task
-        assert app.selected_item() is task
+        app.handle_key("J")  # jump straight to the open CLOCK line
+        assert app.selected_obj() is running_clock
         assert app.doc.project_of(task).collapsed is False
-        app.handle_key("o")  # stop the clock again
+        assert task.collapsed is False
+
+        # -- mark DONE closes the running clock --------------------------
+        select(app, task)
+        app.handle_key("D")
+        assert task.status == "DONE"
+        assert app.doc.running() is None
+
+        # -- project-level DONE marks all tasks (after confirm) ----------
+        select(app, task)
+        app.handle_key("T")  # DONE -> CANCELLED (reverse), so we can see it change
+        assert task.status == "CANCELLED"
+        select(app, project)
+        KEYS.append("y")     # confirm the project-wide DONE
+        app.handle_key("D")
+        assert task.status == "DONE"
 
         # -- soft delete the comment block -------------------------------
         select(app, task)

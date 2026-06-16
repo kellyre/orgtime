@@ -25,6 +25,7 @@ from textual.widgets import (
 )
 
 from .model import (
+    CLOSED_STATUSES,
     STATUSES,
     TS_FORMAT,
     ClockEntry,
@@ -495,6 +496,8 @@ class OrgTimeApp(App):
         Binding("I", "clock_in_at", "In at…"),
         Binding("O", "clock_out_at", "Out at…"),
         Binding("t", "cycle_status", "Status"),
+        Binding("T", "cycle_status_back", "Status back", show=False),
+        Binding("D", "mark_done", "Done"),
         Binding("m", "comment", "Comment"),
         Binding("X", "expunge", "Expunge", show=False),
         Binding("ctrl+z", "undo", "Undo"),
@@ -918,14 +921,57 @@ class OrgTimeApp(App):
             ConfirmDialog(f"Permanently remove {count} deleted (##) line(s)?"), done
         )
 
+    def _apply_status(self, task: Task, status: str) -> None:
+        """Set a task's status, closing its running clock if now closed."""
+        task.status = status
+        if status in CLOSED_STATUSES and task.running_clock():
+            self.doc.clock_out()
+
     def action_cycle_status(self) -> None:
+        self._cycle_status(1)
+
+    def action_cycle_status_back(self) -> None:
+        self._cycle_status(-1)
+
+    def _cycle_status(self, step: int) -> None:
         task = self.selected_task()
         if task is None:
             self.notify("Select a task to change its status", severity="warning")
             return
         self.checkpoint()
-        task.status = STATUSES[(STATUSES.index(task.status) + 1) % len(STATUSES)]
+        self._apply_status(
+            task, STATUSES[(STATUSES.index(task.status) + step) % len(STATUSES)])
         self.save_and_refresh()
+
+    def action_mark_done(self) -> None:
+        obj = self.selected_item()
+        if isinstance(obj, Project):
+            n = len(obj.tasks)
+            if n == 0:
+                self.notify("Project has no tasks", severity="warning")
+                return
+
+            def done(confirmed: bool) -> None:
+                if not confirmed:
+                    return
+                self.checkpoint()
+                for task in obj.tasks:
+                    self._apply_status(task, "DONE")
+                self.save_and_refresh()
+                self.notify(f"Marked {n} task(s) DONE in {obj.name}")
+            self.push_screen(
+                ConfirmDialog(f"Mark all {n} task(s) in '{obj.name}' as DONE?"),
+                done,
+            )
+            return
+        task = self.selected_task()
+        if task is None:
+            self.notify("Select a task or project to mark DONE", severity="warning")
+            return
+        self.checkpoint()
+        self._apply_status(task, "DONE")
+        self.save_and_refresh()
+        self.notify(f"Marked DONE: {task.name}")
 
     def action_priority(self, value: int) -> None:
         obj = self.selected_item()
@@ -957,11 +1003,12 @@ class OrgTimeApp(App):
         if active is None:
             self.notify("No clock is running", severity="warning")
             return
-        _, task, _ = active
-        self.doc.project_of(task).collapsed = False
+        project, task, clock = active
+        project.collapsed = False
+        task.collapsed = False
         self.rebuild_tree()
-        self._focus_object(task)
-        self.notify(f"Jumped to running task: {task.name}")
+        self._focus_object(clock)
+        self.notify(f"Jumped to running clock on {task.name}")
 
     def action_collapse_all(self) -> None:
         obj = self.selected_item()

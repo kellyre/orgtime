@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .model import (
+    CLOSED_STATUSES,
     STATUSES,
     ClockEntry,
     Document,
@@ -285,7 +286,11 @@ class CursesApp:
         elif ch == "O":
             self.clock_out_at()
         elif ch == "t":
-            self.cycle_status()
+            self.cycle_status(1)
+        elif ch == "T":
+            self.cycle_status(-1)
+        elif ch == "D":
+            self.mark_done()
         elif isinstance(ch, str) and ch in "12345":
             self.set_priority(int(ch))
         elif ch == "u":
@@ -338,11 +343,12 @@ class CursesApp:
         if active is None:
             self.message = "No clock is running"
             return
-        _, task, _ = active
-        self.doc.project_of(task).collapsed = False
+        project, task, clock = active
+        project.collapsed = False
+        task.collapsed = False
         self.refresh_rows()
-        self._select_obj(task)
-        self.message = f"Jumped to running task: {task.name}"
+        self._select_obj(clock)
+        self.message = f"Jumped to running clock on {task.name}"
 
     def collapse_all(self) -> None:
         project = self._project_of_selection()
@@ -558,14 +564,45 @@ class CursesApp:
         self.message = f"Clocked out: {task.name} at {when:%H:%M}"
         self.warn_about(clock)
 
-    def cycle_status(self) -> None:
+    def _set_status(self, task: Task, status: str) -> None:
+        """Set a task's status, closing its running clock if now closed."""
+        task.status = status
+        if status in CLOSED_STATUSES and task.running_clock():
+            self.doc.clock_out()
+
+    def cycle_status(self, step: int = 1) -> None:
         task = self.selected_task()
         if task is None:
             self.message = "Select a task to change status"
             return
         self.checkpoint()
-        task.status = STATUSES[(STATUSES.index(task.status) + 1) % len(STATUSES)]
+        self._set_status(
+            task, STATUSES[(STATUSES.index(task.status) + step) % len(STATUSES)])
         self.save_and_refresh()
+
+    def mark_done(self) -> None:
+        obj = self.selected_item()
+        if isinstance(obj, Project):
+            n = len(obj.tasks)
+            if n == 0:
+                self.message = "Project has no tasks"
+                return
+            if not self.confirm(f"Mark all {n} task(s) in '{obj.name}' as DONE?"):
+                return
+            self.checkpoint()
+            for task in obj.tasks:
+                self._set_status(task, "DONE")
+            self.save_and_refresh()
+            self.message = f"Marked {n} task(s) DONE in {obj.name}"
+            return
+        task = self.selected_task()
+        if task is None:
+            self.message = "Select a task or project to mark DONE"
+            return
+        self.checkpoint()
+        self._set_status(task, "DONE")
+        self.save_and_refresh()
+        self.message = f"Marked DONE: {task.name}"
 
     def set_priority(self, value: int) -> None:
         obj = self.selected_item()

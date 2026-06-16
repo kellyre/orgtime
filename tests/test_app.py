@@ -129,20 +129,47 @@ async def run() -> None:
             await pilot.press("escape")
             await pilot.pause()
 
-            # jump to running + collapse all
+            # jump to running CLOCK + collapse all
             clocks_before = len(task.clocks)
             select(app, task)
             await pilot.press("i")  # start a running clock
             await pilot.pause()
+            running_clock = app.doc.running()[2]
             await pilot.press("C")  # collapse every project
             await pilot.pause()
             assert all(p.collapsed for p in app.doc.projects)
-            await pilot.press("J")  # jump to the running task
+            await pilot.press("J")  # jump to the open CLOCK line
             await pilot.pause()
-            assert app.selected_item() is task
+            assert app.selected_item() is running_clock
             assert app.doc.project_of(task).collapsed is False
-            await pilot.press("o")  # stop the clock
+            assert task.collapsed is False
+
+            # mark DONE closes the running clock; T cycles status backward
+            select(app, task)
+            await pilot.press("D")
             await pilot.pause()
+            assert task.status == "DONE"
+            assert app.doc.running() is None
+            await pilot.press("T")  # DONE -> CANCELLED (reverse)
+            assert task.status == "CANCELLED"
+            await pilot.press("t")  # CANCELLED -> DONE (forward)
+            assert task.status == "DONE"
+
+            # project-level DONE marks all tasks after confirmation
+            await pilot.press("T")  # back to CANCELLED so the change is visible
+            assert task.status == "CANCELLED"
+            select(app, app.doc.projects[0])
+            await pilot.press("D")
+            await pilot.pause()
+            await pilot.press("y")  # confirm
+            await pilot.pause()
+            assert task.status == "DONE"
+
+            # restore a sensible state for later steps
+            select(app, task)
+            await pilot.press("T")  # -> CANCELLED
+            await pilot.press("T")  # -> HOLD
+            assert task.status == "HOLD"
             # drop the synthetic clock so later clock-count assertions hold
             task.clocks.pop()
             app.doc.save()

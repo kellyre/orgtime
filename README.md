@@ -83,14 +83,15 @@ multi-line editors (description, comments) save with **`Ctrl+G`**. Press
 | `o`       | Clock out now                                                 |
 | `I`       | Clock in at a time you type (for late starts)                 |
 | `O`       | Clock out at a time you type (for forgotten clock-outs)       |
-| `t`       | Cycle task status (TODO → IN-PROGRESS → HOLD → CANCELLED → DONE) |
+| `t` / `T` | Scroll task status forward / backward through the cycle        |
+| `D`       | Mark task DONE (closes a running clock); on a project, mark all tasks DONE (after confirmation) |
 | `m`       | Add/edit a comment below the selected line (multi-line)       |
 | `1`–`5`   | Set priority of selected project/task (1 = highest)           |
 | `ctrl+z` / `u` | Undo last change (`ctrl+y` redoes)                       |
 | `R`       | Generate a time report to a text file (prompts for date range)|
 | `X`       | Expunge: permanently remove all soft-deleted (`##`) lines     |
 | `space` / `enter` | Collapse / expand the selected project or task        |
-| `J`       | Jump to the running task (expands its project)                 |
+| `J`       | Jump to the running clock entry (expands its project and task) |
 | `C`       | Collapse all projects                                         |
 | `c`       | Consistency check (shows format + semantic problems)          |
 | `r`       | Reload file from disk (after hand-editing)                    |
