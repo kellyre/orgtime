@@ -129,6 +129,27 @@ async def run() -> None:
             await pilot.press("escape")
             await pilot.pause()
 
+            # jump to running + collapse all
+            clocks_before = len(task.clocks)
+            select(app, task)
+            await pilot.press("i")  # start a running clock
+            await pilot.pause()
+            await pilot.press("C")  # collapse every project
+            await pilot.pause()
+            assert all(p.collapsed for p in app.doc.projects)
+            await pilot.press("J")  # jump to the running task
+            await pilot.pause()
+            assert app.selected_item() is task
+            assert app.doc.project_of(task).collapsed is False
+            await pilot.press("o")  # stop the clock
+            await pilot.pause()
+            # drop the synthetic clock so later clock-count assertions hold
+            task.clocks.pop()
+            app.doc.save()
+            app.rebuild_tree()
+            await pilot.pause()
+            assert len(task.clocks) == clocks_before
+
             # delete the comment block -> soft-deleted with ###
             select(app, task)
             await pilot.press("down")  # first comment line under the task

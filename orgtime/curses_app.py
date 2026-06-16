@@ -258,6 +258,10 @@ class CursesApp:
             self.cursor = 0
         elif ch in (curses.KEY_END, "G"):
             self.cursor = len(self.rows) - 1
+        elif ch == "J":
+            self.jump_to_running()
+        elif ch == "C":
+            self.collapse_all()
         elif ch in ("\n", "\r", curses.KEY_ENTER, " ", "\t"):
             self.toggle_collapse()
         elif ch == "N":
@@ -310,6 +314,44 @@ class CursesApp:
         if isinstance(obj, (Project, Task)):
             obj.collapsed = not obj.collapsed
             self.refresh_rows()
+
+    def _select_obj(self, obj) -> bool:
+        for i, row in enumerate(self.rows):
+            if row.obj is obj:
+                self.cursor = i
+                return True
+        return False
+
+    def _project_of_selection(self):
+        obj = self.selected_item()
+        if isinstance(obj, Project):
+            return obj
+        if isinstance(obj, Task):
+            return self.doc.project_of(obj)
+        if isinstance(obj, ClockEntry):
+            task = self.doc.task_of(obj)
+            return self.doc.project_of(task) if task else None
+        return None
+
+    def jump_to_running(self) -> None:
+        active = self.doc.running()
+        if active is None:
+            self.message = "No clock is running"
+            return
+        _, task, _ = active
+        self.doc.project_of(task).collapsed = False
+        self.refresh_rows()
+        self._select_obj(task)
+        self.message = f"Jumped to running task: {task.name}"
+
+    def collapse_all(self) -> None:
+        project = self._project_of_selection()
+        for p in self.doc.projects:
+            p.collapsed = True
+        self.refresh_rows()
+        if project is not None:
+            self._select_obj(project)
+        self.message = "Collapsed all projects"
 
     # -- actions: items ----------------------------------------------------
 

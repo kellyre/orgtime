@@ -502,6 +502,8 @@ class OrgTimeApp(App):
         Binding("ctrl+y", "redo", "Redo", show=False),
         Binding("c", "check", "Check"),
         Binding("R", "report", "Report"),
+        Binding("J", "jump_running", "Running"),
+        Binding("C", "collapse_all", "Collapse all"),
         Binding("r", "reload", "Reload", show=False),
         Binding("q", "quit", "Quit"),
         Binding("j", "cursor_down", "Down", show=False),
@@ -939,6 +941,44 @@ class OrgTimeApp(App):
     def action_check(self) -> None:
         problems = self._load_issues + check_consistency(self.doc)
         self.push_screen(ReportDialog("Consistency check", problems))
+
+    def _focus_object(self, obj) -> None:
+        # scan displayed lines (forces the tree's line cache to refresh after
+        # a rebuild) rather than reading node.line, which can be stale
+        tree = self.query_one("#tree", Tree)
+        for line in range(tree.last_line + 1):
+            node = tree.get_node_at_line(line)
+            if node is not None and node.data is obj:
+                tree.cursor_line = line
+                return
+
+    def action_jump_running(self) -> None:
+        active = self.doc.running()
+        if active is None:
+            self.notify("No clock is running", severity="warning")
+            return
+        _, task, _ = active
+        self.doc.project_of(task).collapsed = False
+        self.rebuild_tree()
+        self._focus_object(task)
+        self.notify(f"Jumped to running task: {task.name}")
+
+    def action_collapse_all(self) -> None:
+        obj = self.selected_item()
+        project = None
+        if isinstance(obj, Project):
+            project = obj
+        elif isinstance(obj, Task):
+            project = self.doc.project_of(obj)
+        elif isinstance(obj, ClockEntry):
+            task = self.doc.task_of(obj)
+            project = self.doc.project_of(task) if task else None
+        for p in self.doc.projects:
+            p.collapsed = True
+        self.rebuild_tree()
+        if project is not None:
+            self._focus_object(project)
+        self.notify("Collapsed all projects")
 
     def action_report(self) -> None:
         def done(result: dict | None) -> None:

@@ -120,6 +120,7 @@ HELP_LINES = [
     "",
     "  Up/Down, j/k     move cursor      Home/End, g/G  top/bottom",
     "  Enter / Space    collapse/expand  Tab            collapse/expand",
+    "  J                jump to running  C              collapse all projects",
     "  N                new project      n              new task",
     "  e                edit item        d              delete (soft)",
     "  m                add/edit comment X              expunge ## lines",

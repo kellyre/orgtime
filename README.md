@@ -90,6 +90,8 @@ multi-line editors (description, comments) save with **`Ctrl+G`**. Press
 | `R`       | Generate a time report to a text file (prompts for date range)|
 | `X`       | Expunge: permanently remove all soft-deleted (`##`) lines     |
 | `space` / `enter` | Collapse / expand the selected project or task        |
+| `J`       | Jump to the running task (expands its project)                 |
+| `C`       | Collapse all projects                                         |
 | `c`       | Consistency check (shows format + semantic problems)          |
 | `r`       | Reload file from disk (after hand-editing)                    |
 | `q`       | Save and quit                                                 |

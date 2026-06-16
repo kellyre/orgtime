@@ -144,6 +144,17 @@ def _scenario(stdscr):
         # a future end is implausible -> warning surfaced
         assert "WARNING" in app.message
 
+        # -- jump to running + collapse all ------------------------------
+        select(app, task)
+        app.handle_key("i")  # start a running clock on the task
+        assert app.doc.running() is not None
+        app.handle_key("C")  # collapse all projects
+        assert all(p.collapsed for p in app.doc.projects)
+        app.handle_key("J")  # jump to running -> expands project, selects task
+        assert app.selected_item() is task
+        assert app.doc.project_of(task).collapsed is False
+        app.handle_key("o")  # stop the clock again
+
         # -- soft delete the comment block -------------------------------
         select(app, task)
         # move cursor onto a comment row of this task
