@@ -10,6 +10,8 @@ from orgtime.view import (
     TASK,
     CommentRef,
     flatten,
+    next_match_index,
+    search_targets,
 )
 
 SAMPLE = """\
@@ -109,9 +111,54 @@ def test_human_duration_in_totals():
     assert "2d 22:43" in project_row.text
 
 
+def test_search_targets_order_and_kinds():
+    doc, _ = parse(SAMPLE)
+    targets = search_targets(doc)
+    # document order: project, project comment, task, task comment, clock
+    # comment, task2, project2, task...
+    assert [t.kind for t in targets][:6] == [
+        PROJECT, COMMENT, TASK, COMMENT, COMMENT, TASK]
+    # the clock-comment target carries its task as the ancestor to expand
+    clock_comment = next(t for t in targets if t.text == "clock note")
+    assert clock_comment.kind == COMMENT
+    assert clock_comment.task is doc.projects[0].tasks[0]
+    assert clock_comment.owner is doc.projects[0].tasks[0].clocks[0]
+
+
+def test_search_targets_finds_collapsed_content():
+    doc, _ = parse(SAMPLE)
+    doc.projects[0].collapsed = True  # hide everything under it
+    targets = search_targets(doc)
+    # collapse state does not affect what is searchable
+    assert any(t.text == "clock note" for t in targets)
+    assert any(t.text == "Design mockups" for t in targets)
+
+
+def test_next_match_index_wraps_and_loops():
+    doc, _ = parse(SAMPLE)
+    targets = search_targets(doc)
+    texts = [t.text for t in targets]
+    # "note" matches project note, task note, clock note
+    note_indices = [i for i, t in enumerate(texts) if "note" in t.lower()]
+    assert len(note_indices) >= 3
+    # starting from -1 gives the first; each subsequent call advances; wraps
+    i1 = next_match_index(targets, "note", -1)
+    i2 = next_match_index(targets, "note", i1)
+    i3 = next_match_index(targets, "note", i2)
+    assert [i1, i2, i3] == note_indices[:3]
+    # from the last match it loops back to the first
+    assert next_match_index(targets, "note", note_indices[-1]) == note_indices[0]
+    # case-insensitive, and None when nothing matches
+    assert next_match_index(targets, "DESIGN", -1) is not None
+    assert next_match_index(targets, "zzz", -1) is None
+
+
 if __name__ == "__main__":
     for fn in [test_flatten_full_tree, test_collapse_hides_descendants,
                test_collapsed_task_hides_clocks_and_comments,
-               test_running_and_warn_flags, test_human_duration_in_totals]:
+               test_running_and_warn_flags, test_human_duration_in_totals,
+               test_search_targets_order_and_kinds,
+               test_search_targets_finds_collapsed_content,
+               test_next_match_index_wraps_and_loops]:
         fn()
         print(f"PASS {fn.__name__}")

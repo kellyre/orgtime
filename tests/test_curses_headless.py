@@ -172,6 +172,39 @@ def _scenario(stdscr):
         app.handle_key("D")
         assert task.status == "DONE"
 
+        # -- search across projects, tasks, and comments -----------------
+        # add a second project to search for and move into
+        KEYS.extend(chars("Other") + ["\n", "\x07", "\n"])
+        app.handle_key("N")
+        other = app.doc.projects[-1]
+        assert other.name == "Other"
+
+        # find the second project by substring (term box starts empty)
+        KEYS.extend(chars("Oth") + ["\n"])
+        app.handle_key("/")
+        assert app.selected_item() is other
+
+        # next search (Ctrl+U clears the prefilled term) -> the task name
+        KEYS.extend(["\x15"] + chars("Mock") + ["\n"])
+        app.handle_key("/")
+        assert app.selected_item() is task
+
+        # search a comment substring -> lands on a comment row of the task
+        KEYS.extend(["\x15"] + chars("first") + ["\n"])
+        app.handle_key("/")
+        sel = app.selected_obj()
+        assert isinstance(sel, CommentRef) and sel.owner is task
+
+        # -- move the task to another project, then back -----------------
+        select(app, task)
+        KEYS.append("\n")  # only other project is "Other" -> accept
+        app.handle_key("M")
+        assert task in other.tasks and task not in project.tasks
+        select(app, task)
+        KEYS.append("\n")  # now the only other project is the original
+        app.handle_key("M")
+        assert task in project.tasks and task not in other.tasks
+
         # -- soft delete the comment block -------------------------------
         select(app, task)
         # move cursor onto a comment row of this task

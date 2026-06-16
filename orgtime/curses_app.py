@@ -46,6 +46,8 @@ from .view import (
     CommentRef,
     HELP_LINES,
     flatten,
+    next_match_index,
+    search_targets,
 )
 
 UNDO_LIMIT = 100
@@ -71,6 +73,7 @@ class CursesApp:
         self._undo: list[Document] = []
         self._redo: list[Document] = []
         self._running = True
+        self.search_term = ""
 
     # -- setup -------------------------------------------------------------
 
@@ -263,6 +266,10 @@ class CursesApp:
             self.jump_to_running()
         elif ch == "C":
             self.collapse_all()
+        elif ch == "/":
+            self.search()
+        elif ch == "M":
+            self.move_task()
         elif ch in ("\n", "\r", curses.KEY_ENTER, " ", "\t"):
             self.toggle_collapse()
         elif ch == "N":
@@ -358,6 +365,77 @@ class CursesApp:
         if project is not None:
             self._select_obj(project)
         self.message = "Collapsed all projects"
+
+    # -- search ------------------------------------------------------------
+
+    def search(self) -> None:
+        term = self.prompt("Search (substring)", self.search_term)
+        if term is None:
+            return
+        term = term.strip()
+        if not term:
+            return
+        self.search_term = term
+        self._do_search()
+
+    def _current_target_index(self, targets) -> int:
+        obj = self.selected_obj()
+        owner = obj.owner if isinstance(obj, CommentRef) else obj
+        for i, target in enumerate(targets):
+            if target.owner is owner:
+                return i
+        return -1
+
+    def _do_search(self) -> None:
+        targets = search_targets(self.doc)
+        if not targets:
+            self.message = "Nothing to search"
+            return
+        idx = next_match_index(targets, self.search_term,
+                               self._current_target_index(targets))
+        if idx is None:
+            self.message = f"No match for {self.search_term!r}"
+            return
+        self._reveal_and_select(targets[idx])
+        self.message = f"Search: {self.search_term}  (/ to repeat)"
+
+    def _reveal_and_select(self, target) -> None:
+        target.project.collapsed = False
+        if target.kind == COMMENT and target.task is not None:
+            target.task.collapsed = False
+        self.refresh_rows()
+        if target.kind == COMMENT:
+            for i, row in enumerate(self.rows):
+                if row.kind == COMMENT and row.obj.owner is target.owner:
+                    self.cursor = i
+                    return
+        else:
+            self._select_obj(target.owner)
+
+    # -- move a task to another project ------------------------------------
+
+    def move_task(self) -> None:
+        task = self.selected_task()
+        if task is None:
+            self.message = "Select a task to move"
+            return
+        src = self.doc.project_of(task)
+        others = [p for p in self.doc.projects if p is not src]
+        if not others:
+            self.message = "No other project to move to"
+            return
+        idx = self.prompt_choice(f"Move '{task.name}' to project",
+                                 [p.name for p in others], 0)
+        if idx is None:
+            return
+        dest = others[idx]
+        self.checkpoint()
+        src.tasks.remove(task)
+        dest.tasks.append(task)
+        dest.collapsed = False
+        self.save_and_refresh()
+        self._select_obj(task)
+        self.message = f"Moved '{task.name}' to {dest.name}"
 
     # -- actions: items ----------------------------------------------------
 

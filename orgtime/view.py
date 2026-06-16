@@ -81,6 +81,54 @@ def comment_text(text: str, depth: int) -> str:
     return f"{_indent(depth)}# {text}" if text else f"{_indent(depth)}#"
 
 
+@dataclass
+class SearchTarget:
+    """A searchable location in the document, in display order.
+
+    ``owner`` is the object to reveal/select: the project or task itself for
+    those kinds, or the comment's owning project/task/clock for COMMENT.
+    ``project``/``task`` are the ancestors that must be expanded to show it.
+    """
+
+    text: str
+    project: Project
+    task: Task | None
+    kind: str
+    owner: object
+
+
+def search_targets(doc: Document) -> list[SearchTarget]:
+    """All searchable items (project names, task names, comment lines) in
+    document order, regardless of collapse state."""
+    targets: list[SearchTarget] = []
+    for project in doc.projects:
+        targets.append(SearchTarget(project.name, project, None, PROJECT, project))
+        for text in project.comments:
+            targets.append(SearchTarget(text, project, None, COMMENT, project))
+        for task in project.tasks:
+            targets.append(SearchTarget(task.name, project, task, TASK, task))
+            for text in task.comments:
+                targets.append(SearchTarget(text, project, task, COMMENT, task))
+            for clock in task.clocks:
+                for text in clock.comments:
+                    targets.append(
+                        SearchTarget(text, project, task, COMMENT, clock))
+    return targets
+
+
+def next_match_index(targets: list[SearchTarget], term: str,
+                     start: int = -1) -> int | None:
+    """Index of the next target after ``start`` whose text contains ``term``
+    (case-insensitive), wrapping around.  None if nothing matches."""
+    term = term.lower()
+    n = len(targets)
+    for offset in range(1, n + 1):
+        i = (start + offset) % n
+        if term in targets[i].text.lower():
+            return i
+    return None
+
+
 def flatten(doc: Document, now: datetime | None = None) -> list[Row]:
     """Walk the document into visible rows, honouring collapse state.
 
@@ -121,6 +169,7 @@ HELP_LINES = [
     "  Up/Down, j/k     move cursor      Home/End, g/G  top/bottom",
     "  Enter / Space    collapse/expand  Tab            collapse/expand",
     "  J                jump to running clock   C       collapse all projects",
+    "  /                search (repeat with /)  M       move task to project",
     "  N                new project      n              new task",
     "  e                edit item        d              delete (soft)",
     "  m                add/edit comment X              expunge ## lines",

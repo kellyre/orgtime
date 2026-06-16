@@ -44,6 +44,7 @@ from .model import (
     tombstoned,
 )
 from .report import build_report, default_filename
+from .view import COMMENT, next_match_index, search_targets
 
 STATUS_COLORS = {
     "TODO": "red",
@@ -452,6 +453,82 @@ class ReportInputDialog(ModalScreen[dict | None]):
         self.dismiss(None)
 
 
+class SearchDialog(ModalScreen[str | None]):
+    """Single-field substring search prompt."""
+
+    BINDINGS = [Binding("escape", "dismiss(None)", "Cancel")]
+
+    def __init__(self, initial: str = "") -> None:
+        super().__init__()
+        self._initial = initial
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Label("Search (substring)", id="dialog-title")
+            yield UndoInput(value=self._initial, id="term")
+            yield Label("[dim]enter: jump to next match · esc: cancel[/]",
+                        id="dialog-hint")
+            with Horizontal(id="dialog-buttons"):
+                yield Button("Search", variant="primary", id="ok")
+                yield Button("Cancel", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#term", Input).focus()
+
+    @on(Input.Submitted)
+    @on(Button.Pressed, "#ok")
+    def ok(self, event) -> None:
+        self.dismiss(self.query_one("#term", Input).value)
+
+    @on(Button.Pressed, "#cancel")
+    def cancel(self, event) -> None:
+        self.dismiss(None)
+
+
+class MoveTaskDialog(ModalScreen[int | None]):
+    """Pick a destination project for the selected task."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss(None)", "Cancel"),
+        Binding("ctrl+s", "save", "Move"),
+    ]
+
+    def __init__(self, task_name: str, project_names: list[str]) -> None:
+        super().__init__()
+        self._task_name = task_name
+        self._names = project_names
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Label(f"Move '{self._task_name}' to project", id="dialog-title")
+            with RadioSet(id="dest"):
+                for i, name in enumerate(self._names):
+                    yield RadioButton(name, value=i == 0)
+            yield Label("[dim]arrows choose · ctrl+s: move · esc: cancel[/]",
+                        id="dialog-hint")
+            with Horizontal(id="dialog-buttons"):
+                yield Button("Move", variant="primary", id="ok")
+                yield Button("Cancel", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#dest", RadioSet).focus()
+
+    def action_save(self) -> None:
+        self._save()
+
+    @on(Button.Pressed, "#ok")
+    def ok_btn(self, event) -> None:
+        self._save()
+
+    def _save(self) -> None:
+        index = self.query_one("#dest", RadioSet).pressed_index
+        self.dismiss(max(0, index))
+
+    @on(Button.Pressed, "#cancel")
+    def cancel(self, event) -> None:
+        self.dismiss(None)
+
+
 class OrgTimeApp(App):
     TITLE = "orgtime"
 
@@ -472,6 +549,7 @@ class OrgTimeApp(App):
     #dialog TextArea { height: 3; }
     #dialog #comment-text { height: 8; }
     #dialog RadioSet { layout: horizontal; height: auto; width: 100%; }
+    #dialog #dest { layout: vertical; max-height: 12; }
     EditDialog, TimeDialog, ClockDialog, ConfirmDialog, ReportDialog,
     CommentDialog {
         align: center middle;
@@ -507,6 +585,8 @@ class OrgTimeApp(App):
         Binding("R", "report", "Report"),
         Binding("J", "jump_running", "Running"),
         Binding("C", "collapse_all", "Collapse all"),
+        Binding("/", "search", "Search"),
+        Binding("M", "move_task", "Move"),
         Binding("r", "reload", "Reload", show=False),
         Binding("q", "quit", "Quit"),
         Binding("j", "cursor_down", "Down", show=False),
@@ -521,6 +601,7 @@ class OrgTimeApp(App):
         self._load_issues: list[str] = []
         self._undo: list[Document] = []
         self._redo: list[Document] = []
+        self._search_term = ""
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -1009,6 +1090,79 @@ class OrgTimeApp(App):
         self.rebuild_tree()
         self._focus_object(clock)
         self.notify(f"Jumped to running clock on {task.name}")
+
+    def _focus_comment(self, owner) -> None:
+        tree = self.query_one("#tree", Tree)
+        for line in range(tree.last_line + 1):
+            node = tree.get_node_at_line(line)
+            if (node is not None and isinstance(node.data, CommentRef)
+                    and node.data.owner is owner):
+                tree.cursor_line = line
+                return
+
+    def _current_target_index(self, targets) -> int:
+        obj = self.selected()
+        owner = obj.owner if isinstance(obj, CommentRef) else obj
+        for i, target in enumerate(targets):
+            if target.owner is owner:
+                return i
+        return -1
+
+    def _reveal_and_select(self, target) -> None:
+        target.project.collapsed = False
+        if target.kind == COMMENT and target.task is not None:
+            target.task.collapsed = False
+        self.rebuild_tree()
+        if target.kind == COMMENT:
+            self._focus_comment(target.owner)
+        else:
+            self._focus_object(target.owner)
+
+    def action_search(self) -> None:
+        def done(term: str | None) -> None:
+            if term is None:
+                return
+            term = term.strip()
+            if not term:
+                return
+            self._search_term = term
+            targets = search_targets(self.doc)
+            if not targets:
+                self.notify("Nothing to search")
+                return
+            idx = next_match_index(targets, term,
+                                   self._current_target_index(targets))
+            if idx is None:
+                self.notify(f"No match for {term!r}", severity="warning")
+                return
+            self._reveal_and_select(targets[idx])
+            self.notify(f"Search: {term}  (/ to repeat)")
+        self.push_screen(SearchDialog(self._search_term), done)
+
+    def action_move_task(self) -> None:
+        task = self.selected_task()
+        if task is None:
+            self.notify("Select a task to move", severity="warning")
+            return
+        src = self.doc.project_of(task)
+        others = [p for p in self.doc.projects if p is not src]
+        if not others:
+            self.notify("No other project to move to", severity="warning")
+            return
+
+        def done(index: int | None) -> None:
+            if index is None:
+                return
+            dest = others[index]
+            self.checkpoint()
+            src.tasks.remove(task)
+            dest.tasks.append(task)
+            dest.collapsed = False
+            self.save_and_refresh()
+            self._focus_object(task)
+            self.notify(f"Moved '{task.name}' to {dest.name}")
+        self.push_screen(
+            MoveTaskDialog(task.name, [p.name for p in others]), done)
 
     def action_collapse_all(self) -> None:
         obj = self.selected_item()

@@ -10,9 +10,11 @@ from orgtime.app import (
     CommentDialog,
     CommentRef,
     EditDialog,
+    MoveTaskDialog,
     OrgTimeApp,
     ReportDialog,
     ReportInputDialog,
+    SearchDialog,
     TimeDialog,
 )
 from orgtime.model import parse
@@ -176,6 +178,39 @@ async def run() -> None:
             app.rebuild_tree()
             await pilot.pause()
             assert len(task.clocks) == clocks_before
+
+            # search across projects, tasks, comments + move a task
+            await pilot.press("N")  # second project to search/move into
+            await pilot.press(*"Other", "ctrl+s")
+            await pilot.pause()
+            other = app.doc.projects[-1]
+            assert other.name == "Other"
+
+            await pilot.press("/")  # search dialog (term starts empty)
+            assert isinstance(app.screen, SearchDialog)
+            await pilot.press(*"Oth", "enter")
+            await pilot.pause()
+            assert app.selected_item() is other
+
+            await pilot.press("/")  # next search; clear the prefilled "Oth"
+            await pilot.press("backspace", "backspace", "backspace")
+            await pilot.press(*"first", "enter")  # matches comment "first line"
+            await pilot.pause()
+            sel = app.query_one(Tree).cursor_node.data
+            assert isinstance(sel, CommentRef) and sel.owner is task
+
+            # move the task to "Other", then back to the original project
+            select(app, task)
+            await pilot.press("M")
+            assert isinstance(app.screen, MoveTaskDialog)
+            await pilot.press("ctrl+s")  # only other project preselected
+            await pilot.pause()
+            assert task in other.tasks and task not in app.doc.projects[0].tasks
+            select(app, task)
+            await pilot.press("M")
+            await pilot.press("ctrl+s")
+            await pilot.pause()
+            assert task in app.doc.projects[0].tasks
 
             # delete the comment block -> soft-deleted with ###
             select(app, task)

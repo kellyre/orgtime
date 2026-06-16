@@ -93,6 +93,8 @@ multi-line editors (description, comments) save with **`Ctrl+G`**. Press
 | `space` / `enter` | Collapse / expand the selected project or task        |
 | `J`       | Jump to the running clock entry (expands its project and task) |
 | `C`       | Collapse all projects                                         |
+| `/`       | Search project/task names and comments; press `/` again to jump to the next match (loops); Esc cancels, leaving you on the current match |
+| `M`       | Move the selected task to a different project                  |
 | `c`       | Consistency check (shows format + semantic problems)          |
 | `r`       | Reload file from disk (after hand-editing)                    |
 | `q`       | Save and quit                                                 |
