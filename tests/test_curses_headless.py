@@ -180,6 +180,25 @@ def _scenario(stdscr):
         app.handle_key("c")
         app.draw()
 
+        # -- write a time report -----------------------------------------
+        # clock some time first so the report has content
+        select(app, app.doc.projects[0])
+        KEYS.extend(chars("Task") + ["\n", "\x07", "\n", "\n"])
+        app.handle_key("n")
+        rtask = app.doc.projects[0].tasks[0]
+        select(app, rtask)
+        app.handle_key("i")
+        app.handle_key("o")
+        # report: blank start (open), blank end (open), accept default filename
+        KEYS.extend(["\n", "\n", "\n"])
+        app.handle_key("R")
+        assert "Wrote report to" in app.message
+        report_file = Path(app.message.split("Wrote report to", 1)[1].strip())
+        assert report_file.exists()
+        body = report_file.read_text(encoding="utf-8")
+        assert "orgtime time report" in body
+        assert "By project" in body and "By day" in body
+
         # file on disk round-trips cleanly
         doc, issues = parse(path.read_text(encoding="utf-8"))
         assert issues == [], issues

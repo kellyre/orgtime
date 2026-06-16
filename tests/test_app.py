@@ -12,6 +12,7 @@ from orgtime.app import (
     EditDialog,
     OrgTimeApp,
     ReportDialog,
+    ReportInputDialog,
     TimeDialog,
 )
 from orgtime.model import parse
@@ -176,6 +177,16 @@ async def run() -> None:
             assert isinstance(app.screen, ReportDialog)
             await pilot.press("escape")
             await pilot.pause()
+
+            # generate a time report to a file
+            await pilot.press("R")
+            assert isinstance(app.screen, ReportInputDialog)
+            await pilot.press("ctrl+s")  # blank dates, default filename
+            await pilot.pause()
+            reports = list(path.parent.glob("orgtime-report-*.txt"))
+            assert reports, "report file not written"
+            body = reports[0].read_text(encoding="utf-8")
+            assert "orgtime time report" in body and "By day" in body
 
             await pilot.press("q")
 

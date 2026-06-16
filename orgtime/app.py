@@ -38,9 +38,11 @@ from .model import (
     format_ts,
     human_duration,
     load,
+    parse_user_date,
     parse_user_ts,
     tombstoned,
 )
+from .report import build_report, default_filename
 
 STATUS_COLORS = {
     "TODO": "red",
@@ -385,6 +387,70 @@ class ReportDialog(ModalScreen[None]):
         self.dismiss(None)
 
 
+class ReportInputDialog(ModalScreen[dict | None]):
+    """Collect a date range and filename for a time report."""
+
+    BINDINGS = [
+        Binding("escape", "dismiss(None)", "Cancel"),
+        Binding("ctrl+s", "save", "Generate"),
+    ]
+
+    def __init__(self, doc: Document) -> None:
+        super().__init__()
+        self._doc = doc
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="dialog"):
+            yield Label("Generate time report", id="dialog-title")
+            yield Label("Start date (YYYY-MM-DD, blank = open-ended)")
+            yield UndoInput(id="start")
+            yield Label("End date (YYYY-MM-DD, blank = open-ended)")
+            yield UndoInput(id="end")
+            yield Label("Write to file")
+            yield UndoInput(value=default_filename(self._doc, None, None),
+                            id="path")
+            yield Label("[dim]enter or ctrl+s generates · esc cancels[/]",
+                        id="dialog-hint")
+            with Horizontal(id="dialog-buttons"):
+                yield Button("Generate", variant="primary", id="save")
+                yield Button("Cancel", id="cancel")
+
+    def on_mount(self) -> None:
+        self.query_one("#start", Input).focus()
+
+    def _date(self, field: str):
+        raw = self.query_one(f"#{field}", Input).value.strip()
+        if not raw:
+            return None, True
+        d = parse_user_date(raw)
+        return d, d is not None
+
+    def action_save(self) -> None:
+        self._save()
+
+    @on(Input.Submitted)
+    @on(Button.Pressed, "#save")
+    def save_event(self, event) -> None:
+        self._save()
+
+    def _save(self) -> None:
+        start, ok1 = self._date("start")
+        end, ok2 = self._date("end")
+        if not ok1 or not ok2:
+            self.notify("Invalid date — use YYYY-MM-DD", severity="error")
+            return
+        if start is not None and end is not None and end < start:
+            self.notify("End date is before start date", severity="error")
+            return
+        name = self.query_one("#path", Input).value.strip() \
+            or default_filename(self._doc, start, end)
+        self.dismiss({"start": start, "end": end, "name": name})
+
+    @on(Button.Pressed, "#cancel")
+    def cancel(self, event) -> None:
+        self.dismiss(None)
+
+
 class OrgTimeApp(App):
     TITLE = "orgtime"
 
@@ -435,6 +501,7 @@ class OrgTimeApp(App):
         Binding("u", "undo", "Undo", show=False),
         Binding("ctrl+y", "redo", "Redo", show=False),
         Binding("c", "check", "Check"),
+        Binding("R", "report", "Report"),
         Binding("r", "reload", "Reload", show=False),
         Binding("q", "quit", "Quit"),
         Binding("j", "cursor_down", "Down", show=False),
@@ -872,6 +939,24 @@ class OrgTimeApp(App):
     def action_check(self) -> None:
         problems = self._load_issues + check_consistency(self.doc)
         self.push_screen(ReportDialog("Consistency check", problems))
+
+    def action_report(self) -> None:
+        def done(result: dict | None) -> None:
+            if not result:
+                return
+            out_path = Path(result["name"])
+            if not out_path.is_absolute():
+                base = self.doc.path.parent if self.doc.path else Path.cwd()
+                out_path = base / out_path
+            try:
+                out_path.write_text(
+                    build_report(self.doc, result["start"], result["end"]),
+                    encoding="utf-8")
+            except OSError as exc:
+                self.notify(f"Could not write report: {exc}", severity="error")
+                return
+            self.notify(f"Wrote report to {out_path}")
+        self.push_screen(ReportInputDialog(self.doc), done)
 
     def action_reload(self) -> None:
         self.checkpoint()

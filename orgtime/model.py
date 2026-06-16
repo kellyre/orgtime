@@ -66,6 +66,20 @@ def parse_user_ts(text: str, base: datetime | None = None) -> datetime | None:
     return datetime.combine((base or datetime.now()).date(), clock_time)
 
 
+def parse_user_date(text: str):
+    """Parse a user-typed date ('YYYY-MM-DD' or 'YYYY/MM/DD').
+
+    Returns a ``datetime.date`` or None if it cannot be parsed.
+    """
+    text = text.strip()
+    for fmt in ("%Y-%m-%d", "%Y/%m/%d"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
 def format_ts(dt: datetime) -> str:
     return f"[{dt.strftime('%Y-%m-%d')} {DAY_NAMES[dt.weekday()]} {dt.strftime('%H:%M')}]"
 

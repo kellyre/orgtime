@@ -87,6 +87,7 @@ multi-line editors (description, comments) save with **`Ctrl+G`**. Press
 | `m`       | Add/edit a comment below the selected line (multi-line)       |
 | `1`–`5`   | Set priority of selected project/task (1 = highest)           |
 | `ctrl+z` / `u` | Undo last change (`ctrl+y` redoes)                       |
+| `R`       | Generate a time report to a text file (prompts for date range)|
 | `X`       | Expunge: permanently remove all soft-deleted (`##`) lines     |
 | `space` / `enter` | Collapse / expand the selected project or task        |
 | `c`       | Consistency check (shows format + semantic problems)          |
@@ -128,6 +129,16 @@ CLOCK line.
   project/task/clock line above it. In the app, comments show under their
   owner and collapse with it; `m` adds or edits the block, and adjoining
   comment lines are always edited as one block.
+
+### Time reports
+
+Press `R` to write a plain-text time report. You're prompted for a start and
+end date (`YYYY-MM-DD`, blank = open-ended) and an output filename
+(defaulting to `orgtime-report-<start>_<end>.txt` next to your `.org` file).
+The report shows a grand total plus three groupings — by project, by project
+and task, and by day. A clock entry is counted, in full, on the date of its
+start timestamp; running clocks are counted up to generation time and listed
+in a note.
 
 ### Soft deletion
 

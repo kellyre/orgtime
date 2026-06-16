@@ -33,9 +33,11 @@ from .model import (
     comment_lines,
     format_ts,
     load,
+    parse_user_date,
     parse_user_ts,
     tombstoned,
 )
+from .report import build_report, default_filename
 from .view import (
     COMMENT,
     PROJECT,
@@ -46,6 +48,7 @@ from .view import (
 )
 
 UNDO_LIMIT = 100
+_CANCEL = object()  # sentinel: user pressed Esc in a prompt
 
 # colour pair ids
 CP_PROJECT = 1
@@ -287,6 +290,8 @@ class CursesApp:
             self.action_redo()
         elif ch == "c":
             self.check()
+        elif ch == "R":
+            self.report()
         elif ch == "r":
             self.reload()
         elif ch == "?":
@@ -537,6 +542,50 @@ class CursesApp:
         problems = self.load_issues + check_consistency(self.doc)
         self.show_report("Consistency check", problems or ["No problems found."],
                          plain=True)
+
+    def prompt_date(self, label: str):
+        """Prompt for an optional date.  Returns a date, None (blank = open),
+        or the _CANCEL sentinel if Esc was pressed."""
+        default = ""
+        while True:
+            raw = self.prompt(f"{label} (YYYY-MM-DD, blank = open-ended)", default)
+            if raw is None:
+                return _CANCEL
+            raw = raw.strip()
+            if not raw:
+                return None
+            d = parse_user_date(raw)
+            if d is not None:
+                return d
+            self.message = "Invalid date; try again"
+            default = raw
+
+    def report(self) -> None:
+        start = self.prompt_date("Report start")
+        if start is _CANCEL:
+            return
+        end = self.prompt_date("Report end")
+        if end is _CANCEL:
+            return
+        if start is not None and end is not None and end < start:
+            self.message = "End date is before start date"
+            return
+        default = default_filename(self.doc, start, end)
+        name = self.prompt("Write report to file", default)
+        if name is None:
+            return
+        name = name.strip() or default
+        out_path = Path(name)
+        if not out_path.is_absolute():
+            base = self.doc.path.parent if self.doc.path else Path.cwd()
+            out_path = base / out_path
+        try:
+            out_path.write_text(build_report(self.doc, start, end),
+                                encoding="utf-8")
+        except OSError as exc:
+            self.message = f"Could not write report: {exc}"
+            return
+        self.message = f"Wrote report to {out_path}"
 
     def reload(self) -> None:
         self.checkpoint()
