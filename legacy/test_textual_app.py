@@ -1,4 +1,8 @@
-"""Headless smoke test of the TUI using Textual's pilot."""
+"""Headless smoke test of the FROZEN Textual TUI using Textual's pilot.
+
+Not part of the routine suite. Run from the repo root with:
+    PYTHONPATH=. python legacy/test_textual_app.py
+"""
 
 import asyncio
 import tempfile
@@ -8,7 +12,7 @@ from textual.widgets import Tree
 
 from datetime import datetime
 
-from orgtime.app import (
+from legacy.textual_app import (
     CommentDialog,
     CommentRef,
     ConfirmListDialog,

@@ -1,4 +1,0 @@
-# Dependencies for the curses front-end (python -m orgtime.curses_app).
-# On Linux/macOS the curses module ships with Python — nothing is needed.
-# On Windows, the standard library has no curses, so install this shim:
-windows-curses>=2.4 ; sys_platform == "win32"

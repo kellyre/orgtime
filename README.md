@@ -4,15 +4,13 @@ A simple terminal time tracker inspired by Emacs org-mode clocking.
 Projects contain tasks; tasks accumulate `CLOCK:` entries. Everything is
 stored in a plain-text, org-like file you can edit by hand.
 
-Two front-ends share the same file format and model:
+The app is a **curses** terminal UI. `curses` ships with Python on
+Linux/macOS (no third-party packages at all); on Windows it needs the
+`windows-curses` shim. The UI-agnostic core (`model`, `view`, `report`) is
+kept separate so it can back other front-ends.
 
-- **Textual** (`python -m orgtime`) — the full-featured UI; needs the
-  `textual` package.
-- **curses** (`python -m orgtime.curses_app`) — an alternative for
-  locked-down environments where `textual` isn't available. Same
-  functionality, plainer presentation. `curses` ships with Python on
-  Linux/macOS (no third-party packages at all); on Windows it needs the
-  `windows-curses` shim (`pip install -r requirements-curses.txt`).
+> A Textual front-end also exists but is **frozen / unmaintained** — see
+> [`legacy/`](legacy). New features go to the curses app only.
 
 ## Setup
 
@@ -22,54 +20,26 @@ cd orgtime
 python -m venv venv
 ```
 
-Windows:
+On Linux/macOS no dependencies are required. On Windows, install the curses
+shim once:
+
 ```
 venv\Scripts\pip install -r requirements.txt
-```
-Mac/Linux:
-```
-venv/bin/pip install -r requirements.txt
 ```
 
 ## Run
 
-Windows:
 ```
-orgtime.bat
-orgtime.bat path\to\file.org
-```
-
-Mac/Linux:
-```
-venv/bin/python -m orgtime
-venv/bin/python -m orgtime path/to/file.org
+python -m orgtime                 # opens/creates timelog.org here
+python -m orgtime path/to/file.org
 ```
 
-Without a file argument, opens (or creates) `timelog.org` in the current directory.
+On Windows you can use the launcher `orgtime.bat [file]` instead.
 
-### curses front-end (for environments without `textual`)
-
-On Linux/macOS, skip the install step entirely — just run:
-
-```
-python3 -m orgtime.curses_app
-python3 -m orgtime.curses_app path/to/file.org
-```
-
-(or `./orgtime-curses [file]`).
-
-On Windows, install the curses shim once, then use the launcher:
-
-```
-venv\Scripts\pip install -r requirements-curses.txt
-orgtime-curses.bat
-orgtime-curses.bat path\to\file.org
-```
-
-Keys match the table below, with two differences forced by the terminal:
-**`u`** undoes and **`Ctrl+R`** redoes (terminals reserve `Ctrl+Z`), and the
-multi-line comment editor saves with **`Ctrl+G`**. Press **`?`** inside the
-app for the full key list.
+Keys are listed below; two are forced by the terminal: **`u`** undoes and
+**`Ctrl+R`** redoes (terminals reserve `Ctrl+Z`), and the multi-line comment
+editor saves with **`Ctrl+G`**. Press **`?`** inside the app for the full
+key list.
 
 ## Keys
 
@@ -177,7 +147,16 @@ created. Durations in `CLOCK:` lines are always hours:minutes (`48:00` =
 
 ## Tests
 
+Each file is a plain script (no pytest). Run from the repo root:
+
 ```
 PYTHONPATH=. venv\Scripts\python tests\test_model.py
-PYTHONPATH=. venv\Scripts\python tests\test_app.py
+PYTHONPATH=. venv\Scripts\python tests\test_view.py
+PYTHONPATH=. venv\Scripts\python tests\test_report.py
+PYTHONPATH=. venv\Scripts\python tests\test_overlap.py
+PYTHONPATH=. venv\Scripts\python tests\test_curses_headless.py
 ```
+
+`test_curses_headless.py` drives the real curses UI (needs `windows-curses`
+on Windows). The frozen Textual test lives in `legacy/` and is not part of
+this suite.

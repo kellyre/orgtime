@@ -1,15 +1,10 @@
-"""Entry point: python -m orgtime [file]"""
+"""Entry point: python -m orgtime [file]
 
-import sys
-from pathlib import Path
+Launches the curses front-end (the maintained app). The frozen Textual
+version lives in legacy/ and is run with: python -m legacy.textual_app
+"""
 
-from .app import OrgTimeApp
-
-
-def main() -> None:
-    path = Path(sys.argv[1]) if len(sys.argv) > 1 else Path("timelog.org")
-    OrgTimeApp(path.resolve()).run()
-
+from .curses_app import main
 
 if __name__ == "__main__":
     main()

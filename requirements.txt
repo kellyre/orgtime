@@ -1,1 +1,4 @@
-textual>=0.80
+# Dependencies for orgtime (the curses app, python -m orgtime).
+# On Linux/macOS the curses module ships with Python — nothing is needed.
+# On Windows, the standard library has no curses, so install this shim:
+windows-curses>=2.4 ; sys_platform == "win32"

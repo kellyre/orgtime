@@ -1,4 +1,13 @@
-"""Textual TUI for orgtime."""
+"""Textual TUI for orgtime — FROZEN / UNMAINTAINED (archived 2026-06-12).
+
+The curses front-end (``orgtime/curses_app.py``) is the maintained app.
+This Textual version is kept as a working snapshot but is no longer updated
+with new features; it consumes the shared, UI-agnostic core in ``orgtime/``
+(model, view, report) via absolute imports, so it keeps running as long as
+those modules' interfaces don't change.
+
+Run with:  python -m legacy.textual_app [file]   (requires ``textual``)
+"""
 
 from __future__ import annotations
 
@@ -24,7 +33,7 @@ from textual.widgets import (
     Tree,
 )
 
-from .model import (
+from orgtime.model import (
     CLOSED_STATUSES,
     STATUSES,
     TS_FORMAT,
@@ -46,8 +55,8 @@ from .model import (
     parse_user_ts,
     tombstoned,
 )
-from .report import build_report, default_filename
-from .view import COMMENT, next_match_index, search_targets
+from orgtime.report import build_report, default_filename
+from orgtime.view import COMMENT, next_match_index, search_targets
 
 STATUS_COLORS = {
     "TODO": "red",
