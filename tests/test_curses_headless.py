@@ -112,28 +112,28 @@ def _scenario(stdscr):
         assert len(task.clocks) == 1 and not task.clocks[0].running
 
         # -- comment on the task via the real multi-line editor ----------
-        # newline typed between the two lines (Enter), saved with Ctrl+G
+        # newline typed between the two lines (Enter), saved with Ctrl+O
         select(app, task)
-        KEYS.extend(chars("first") + ["\n"] + chars("second") + ["\x07"])
-        app.handle_key("m")
+        KEYS.extend(chars("first") + ["\n"] + chars("second") + ["\x0f"])
+        app.handle_key("c")
         assert task.comments == ["first", "second"], task.comments
         app.draw()
 
         # -- regression: insert a newline in the MIDDLE of existing text --
         # start "helloworld", Home, Right x5 (between hello|world), Enter, save
-        KEYS.extend([curses.KEY_HOME] + [curses.KEY_RIGHT] * 5 + ["\n", "\x07"])
+        KEYS.extend([curses.KEY_HOME] + [curses.KEY_RIGHT] * 5 + ["\n", "\x0f"])
         out = app.edit_multiline("split test", "helloworld")
         assert out == "hello\nworld", repr(out)
         # and Backspace at column 0 joins lines back together
-        KEYS.extend([curses.KEY_HOME, curses.KEY_BACKSPACE, "\x07"])
+        KEYS.extend([curses.KEY_HOME, curses.KEY_BACKSPACE, "\x0f"])
         out = app.edit_multiline("join test", "hello\nworld")
         assert out == "helloworld", repr(out)
 
         # -- status cycle (both directions) + priority key ---------------
         select(app, task)
-        app.handle_key("t")  # IN-PROGRESS -> HOLD
+        app.handle_key("s")  # IN-PROGRESS -> HOLD
         assert task.status == "HOLD"
-        app.handle_key("T")  # HOLD -> IN-PROGRESS (reverse)
+        app.handle_key("S")  # HOLD -> IN-PROGRESS (reverse)
         assert task.status == "IN-PROGRESS"
         app.handle_key("2")
         assert task.priority == 2
@@ -206,7 +206,7 @@ def _scenario(stdscr):
 
         # -- project-level DONE marks all tasks (after confirm) ----------
         select(app, task)
-        app.handle_key("T")  # DONE -> CANCELLED (reverse), so we can see it change
+        app.handle_key("S")  # DONE -> CANCELLED (reverse), so we can see it change
         assert task.status == "CANCELLED"
         select(app, project)
         KEYS.append("y")     # confirm the project-wide DONE
@@ -239,11 +239,11 @@ def _scenario(stdscr):
         # -- move the task to another project, then back -----------------
         select(app, task)
         KEYS.append("\n")  # only other project is "Other" -> accept
-        app.handle_key("M")
+        app.handle_key("m")
         assert task in other.tasks and task not in project.tasks
         select(app, task)
         KEYS.append("\n")  # now the only other project is the original
-        app.handle_key("M")
+        app.handle_key("m")
         assert task in project.tasks and task not in other.tasks
 
         # -- soft delete the comment block -------------------------------
@@ -271,7 +271,7 @@ def _scenario(stdscr):
         assert len(app.doc.projects[0].tasks) == 1
 
         # -- redo, then expunge ------------------------------------------
-        app.handle_key("\x12")  # Ctrl+R as get_wch delivers it
+        app.handle_key("U")  # redo
         assert app.doc.projects[0].tasks == []
         KEYS.append("y")
         app.handle_key("X")
@@ -279,7 +279,7 @@ def _scenario(stdscr):
 
         # -- consistency report renders & closes -------------------------
         KEYS.append("q")  # any key closes the report
-        app.handle_key("c")
+        app.handle_key("v")  # verify (consistency check)
         app.draw()
 
         # -- write a time report -----------------------------------------
@@ -293,7 +293,7 @@ def _scenario(stdscr):
         app.handle_key("o")
         # report: blank start (open), blank end (open), accept default filename
         KEYS.extend(["\n", "\n", "\n"])
-        app.handle_key("R")
+        app.handle_key("r")
         assert "Wrote report to" in app.message
         report_file = Path(app.message.split("Wrote report to", 1)[1].strip())
         assert report_file.exists()

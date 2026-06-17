@@ -271,7 +271,7 @@ class CursesApp:
             self.collapse_all()
         elif ch == "/":
             self.search()
-        elif ch == "M":
+        elif ch == "m":
             self.move_task()
         elif ch in ("\n", "\r", curses.KEY_ENTER, " ", "\t"):
             self.toggle_collapse()
@@ -283,7 +283,7 @@ class CursesApp:
             self.edit()
         elif ch == "d":
             self.delete()
-        elif ch == "m":
+        elif ch == "c":
             self.comment()
         elif ch == "X":
             self.expunge()
@@ -295,9 +295,9 @@ class CursesApp:
             self.clock_in_at()
         elif ch == "O":
             self.clock_out_at()
-        elif ch == "t":
+        elif ch == "s":
             self.cycle_status(1)
-        elif ch == "T":
+        elif ch == "S":
             self.cycle_status(-1)
         elif ch == "D":
             self.mark_done()
@@ -305,13 +305,13 @@ class CursesApp:
             self.set_priority(int(ch))
         elif ch == "u":
             self.action_undo()
-        elif ch in ("\x12", 18):  # Ctrl+R (str from get_wch, int from getch)
+        elif ch == "U":
             self.action_redo()
-        elif ch == "c":
+        elif ch == "v":
             self.check()
-        elif ch == "R":
-            self.report()
         elif ch == "r":
+            self.report()
+        elif ch == "L":
             self.reload()
         elif ch == "?":
             self.show_report("Help", HELP_LINES, plain=True)
@@ -590,7 +590,7 @@ class CursesApp:
         self.edit_comment(owner)
 
     def edit_comment(self, owner) -> None:
-        text = self.edit_multiline("Comment (Ctrl+G save, Esc cancel)",
+        text = self.edit_multiline("Comment (Ctrl+O save, Esc cancel)",
                                    "\n".join(owner.comments))
         if text is None:
             return
@@ -889,7 +889,7 @@ class CursesApp:
         Maintains a list of lines and a (row, col) cursor so that Enter
         splits the current line at the cursor (inserting a blank line in the
         middle works), Backspace joins with the previous line at column 0,
-        etc.  Ctrl+G saves, Esc cancels (returns None).
+        etc.  Ctrl+O saves, Esc cancels (returns None).
 
         This replaces curses.textpad.Textbox, which is a fixed character
         grid and cannot insert a newline in the middle of existing text.
@@ -918,7 +918,7 @@ class CursesApp:
             return ch in (curses.KEY_BACKSPACE, "\x7f", "\b", "\x08", 127, 8)
 
         def is_save(ch):
-            return ch in ("\x07", 7)        # Ctrl+G
+            return ch in ("\x0f", 15)       # Ctrl+O (output/save)
 
         def is_cancel(ch):
             return ch in ("\x1b", 27)       # Esc
@@ -935,7 +935,7 @@ class CursesApp:
                 win.erase()
                 win.box()
                 win.addstr(0, 2, f" {title[: width - 6]} ")
-                hint = "Enter: newline  Ctrl+G: save  Esc: cancel"
+                hint = "Enter: newline  Ctrl+O: save  Esc: cancel"
                 try:
                     win.addstr(height - 1, 2, hint[: width - 4])
                 except curses.error:

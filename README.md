@@ -36,49 +36,47 @@ python -m orgtime path/to/file.org
 
 On Windows you can use the launcher `orgtime.bat [file]` instead.
 
-Keys are listed below; two are forced by the terminal: **`u`** undoes and
-**`Ctrl+R`** redoes (terminals reserve `Ctrl+Z`), and the multi-line comment
-editor saves with **`Ctrl+G`**. Press **`?`** inside the app for the full
-key list.
+Press **`?`** inside the app for the full key list.
 
 ## Keys
 
 | Key       | Action                                                        |
 |-----------|---------------------------------------------------------------|
-| `N`       | New project                                                   |
 | `n`       | New task (in the selected project)                            |
-| `e`       | Edit selected project / task / clock entry                    |
-| `d`       | Delete selected (with confirmation)                           |
-| `i`       | Clock in on the selected task (clocks out anything running)   |
-| `o`       | Clock out now                                                 |
-| `I`       | Clock in at a time you type (for late starts)                 |
-| `O`       | Clock out at a time you type (for forgotten clock-outs)       |
-| `t` / `T` | Scroll task status forward / backward through the cycle        |
+| `N`       | New project                                                   |
+| `e`       | Edit selected — rename project/task, or edit a clock / comment |
+| `d`       | Delete selected (soft, with confirmation)                     |
+| `c`       | Add/edit the comment below the selected line (multi-line)     |
+| `m`       | Move the selected task to a different project                  |
+| `i` / `o` | Clock in / out now (clock-in clocks out anything running)     |
+| `I` / `O` | Clock in / out at a time you type (late starts, forgotten stops) |
+| `s` / `S` | Scroll task status forward / backward through the cycle        |
 | `D`       | Mark task DONE (closes a running clock); on a project, mark all tasks DONE (after confirmation) |
-| `m`       | Add/edit a comment below the selected line (multi-line)       |
 | `1`–`5`   | Set priority of selected project/task (1 = highest)           |
-| `ctrl+z` / `u` | Undo last change (`ctrl+y` redoes)                       |
-| `R`       | Generate a time report to a text file (prompts for date range)|
+| `u` / `U` | Undo / redo last change                                       |
+| `r`       | Generate a time report to a text file (prompts for date range)|
+| `L`       | Reload file from disk (after hand-editing)                    |
+| `v`       | Verify: consistency check (format + semantic problems)        |
 | `X`       | Expunge: permanently remove all soft-deleted (`##`) lines     |
-| `space` / `enter` | Collapse / expand the selected project or task        |
 | `J`       | Jump to the running clock entry (expands its project and task) |
-| `C`       | Collapse all projects                                         |
+| `C`       | Collapse all projects                                        |
+| `space` / `enter` / `tab` | Collapse / expand the selected project or task |
 | `/`       | Search project/task names and comments; press `/` again to jump to the next match (loops); Esc cancels, leaving you on the current match |
-| `M`       | Move the selected task to a different project                  |
-| `c`       | Consistency check (shows format + semantic problems)          |
-| `r`       | Reload file from disk (after hand-editing)                    |
+| `?`       | Show the in-app key list                                     |
 | `q`       | Save and quit                                                 |
 
-Arrow keys / `j` `k` move the cursor. The bar above the footer shows the
-running clock, ticking live. Every change is saved to the file immediately.
+Arrow keys / `j` `k` move the cursor; `g` / `G` jump to top / bottom. Every
+change is saved to the file immediately.
 
-In dialogs: `Enter` on the name field saves right away, `ctrl+s` saves from
-any field, `Esc` cancels. Text fields open with the cursor at the end (no
-select-all), and `ctrl+z` inside a field undoes your keystrokes there. Priority and status are radio rows — tab to them
-and pick with the arrow keys. Time fields accept `YYYY-MM-DD HH:MM` or just
-`HH:MM` (today's date is assumed; for clock-out, the day the clock started).
-To fix an already-recorded interval, expand the task and press `e` on the
-CLOCK line.
+In the multi-line comment editor (`c`): **`Ctrl+O`** saves, **Esc** cancels,
+Enter inserts a newline.
+
+In single-line prompts (name, search, times): type and press `Enter`; `Esc`
+cancels. New projects/tasks default to priority `#3` and status `TODO` —
+adjust afterward with `1`–`5` and `s`/`S`/`D`. Time fields accept
+`YYYY-MM-DD HH:MM` or just `HH:MM` (today's date is assumed; for clock-out,
+the day the clock started). To fix an already-recorded interval, expand the
+task and press `e` on the CLOCK line.
 
 ### Overlap resolution
 
@@ -113,12 +111,12 @@ make, then applies them on confirmation (Esc/No cancels the whole edit):
   load (descriptions are no longer a separate feature).
 - A line starting with a single `#` is a comment, attached to the nearest
   project/task/clock line above it. In the app, comments show under their
-  owner and collapse with it; `m` adds or edits the block, and adjoining
+  owner and collapse with it; `c` adds or edits the block, and adjoining
   comment lines are always edited as one block.
 
 ### Time reports
 
-Press `R` to write a plain-text time report. You're prompted for a start and
+Press `r` to write a plain-text time report. You're prompted for a start and
 end date (`YYYY-MM-DD`, blank = open-ended) and an output filename
 (defaulting to `orgtime-report-<start>_<end>.txt` next to your `.org` file).
 The report shows a grand total plus three groupings — by project, by project
@@ -134,9 +132,10 @@ two or more `#` are invisible in the app but stay in the file, so nothing
 is ever lost: hand-remove the `##` and press `r` to resurrect something,
 or press `X` to expunge all soft-deleted lines for good.
 
-Hand-edit freely, then press `r` in the app. Malformed lines are reported
-at load time; `c` additionally flags semantic problems: stated duration not
-matching the timestamps, day name not matching the date, end before start,
+Hand-edit freely, then press `L` to reload in the app. Malformed lines are
+reported at load time; `v` (verify) additionally flags semantic problems:
+stated duration not matching the timestamps, day name not matching the date,
+end before start,
 overlapping clock entries, more than one running clock, and running clocks
 on DONE/CANCELLED tasks. It also flags implausible entries — timestamps in
 the future, closed entries of 24 hours or more, and clocks left running for
