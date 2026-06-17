@@ -3,10 +3,8 @@
 File format (a simplified org-mode):
 
     * [#2] Project name
-      :DESCRIPTION: free text about the project
     # a comment line attached to the project
     ** TODO [#1] Task name
-       :DESCRIPTION: free text about the task
     # a comment attached to the task
        CLOCK: [2026-06-10 Wed 09:00]--[2026-06-10 Wed 10:30] => 1:30
     # a comment attached to that clock entry
@@ -21,6 +19,9 @@ more ``#`` are soft-deleted ("tombstones"): invisible in the UI but kept
 verbatim in the file until expunged.  Deleting anything prepends ``##``
 to its lines rather than removing them, so a deleted comment ends up
 with ``###``.
+
+Legacy ``:DESCRIPTION:`` lines (descriptions are no longer a feature) are
+migrated to comments on the nearest project/task when a file is loaded.
 
 The file is meant to be hand-editable; ``parse()`` collects problems
 instead of crashing, and ``check_consistency()`` flags semantic errors.
@@ -163,7 +164,6 @@ class Task:
     name: str
     status: str = "TODO"
     priority: int = 3
-    description: str = ""
     comments: list[str] = field(default_factory=list)
     tombstones: list[str] = field(default_factory=list)
     clocks: list[ClockEntry] = field(default_factory=list)
@@ -177,7 +177,6 @@ class Task:
 
     def lines(self) -> list[str]:
         out = [f"** {self.status} [#{self.priority}] {self.name}"]
-        out += [f"   :DESCRIPTION: {d}" for d in filter(None, self.description.splitlines())]
         out += comment_lines(self.comments)
         out += self.tombstones
         for clock in self.clocks:
@@ -189,7 +188,6 @@ class Task:
 class Project:
     name: str
     priority: int = 3
-    description: str = ""
     comments: list[str] = field(default_factory=list)
     tombstones: list[str] = field(default_factory=list)
     tasks: list[Task] = field(default_factory=list)
@@ -200,7 +198,6 @@ class Project:
 
     def lines(self) -> list[str]:
         out = [f"* [#{self.priority}] {self.name}"]
-        out += [f"  :DESCRIPTION: {d}" for d in filter(None, self.description.splitlines())]
         out += comment_lines(self.comments)
         out += self.tombstones
         for task in self.tasks:
@@ -383,13 +380,14 @@ def parse(text: str) -> tuple[Document, list[str]]:
                 anchor.tombstones.append(stripped)
 
         elif _DESC_RE.match(line):
+            # legacy :DESCRIPTION: lines are migrated to comments on the
+            # nearest project/task (descriptions are no longer a feature)
             if current is None:
                 issues.append(f"line {lineno}: :DESCRIPTION: before any project/task")
                 continue
             text_part = _DESC_RE.match(line).group(1)
-            current.description = (
-                f"{current.description}\n{text_part}" if current.description else text_part
-            )
+            if text_part:
+                current.comments.append(text_part)
 
         elif stripped.startswith("CLOCK:"):
             match = _CLOCK_RE.match(line)

@@ -83,21 +83,23 @@ def _scenario(stdscr):
         app.refresh_rows()
         app.draw()
 
-        # -- new project -------------------------------------------------
-        # prompt name; multiline desc (ctrl+g empty); choice priority (enter)
-        KEYS.extend(chars("Website") + ["\n", ctrl("G"), "\n"])
+        # -- new project (just type the name) ----------------------------
+        KEYS.extend(chars("Website") + ["\n"])
         app.handle_key("N")
         assert len(app.doc.projects) == 1
         project = app.doc.projects[0]
         assert project.name == "Website" and project.priority == 3
 
-        # -- new task (name, desc, priority pick '1', status default) -----
+        # -- new task (name only; defaults TODO #3) ----------------------
         select(app, project)
-        KEYS.extend(chars("Mockups") + ["\n", ctrl("G"), "1", "\n", "\n"])
+        KEYS.extend(chars("Mockups") + ["\n"])
         app.handle_key("n")
         task = project.tasks[0]
-        assert task.name == "Mockups" and task.priority == 1
+        assert task.name == "Mockups" and task.priority == 3
         assert task.status == "TODO"
+        # priority is set afterward with a digit key
+        app.handle_key("1")
+        assert task.priority == 1
         app.draw()
 
         # -- clock in / out ----------------------------------------------
@@ -213,7 +215,7 @@ def _scenario(stdscr):
 
         # -- search across projects, tasks, and comments -----------------
         # add a second project to search for and move into
-        KEYS.extend(chars("Other") + ["\n", "\x07", "\n"])
+        KEYS.extend(chars("Other") + ["\n"])
         app.handle_key("N")
         other = app.doc.projects[-1]
         assert other.name == "Other"
@@ -283,7 +285,7 @@ def _scenario(stdscr):
         # -- write a time report -----------------------------------------
         # clock some time first so the report has content
         select(app, app.doc.projects[0])
-        KEYS.extend(chars("Task") + ["\n", "\x07", "\n", "\n"])
+        KEYS.extend(chars("Task") + ["\n"])
         app.handle_key("n")
         rtask = app.doc.projects[0].tasks[0]
         select(app, rtask)

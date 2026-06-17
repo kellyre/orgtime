@@ -152,12 +152,11 @@ class EditDialog(ModalScreen[dict | None]):
         Binding("ctrl+s", "save", "Save"),
     ]
 
-    def __init__(self, title: str, *, name: str = "", description: str = "",
+    def __init__(self, title: str, *, name: str = "",
                  priority: int = 3, status: str | None = None) -> None:
         super().__init__()
         self._title = title
         self._name = name
-        self._description = description
         self._priority = priority
         self._status = status  # None => project (no status field)
 
@@ -166,8 +165,6 @@ class EditDialog(ModalScreen[dict | None]):
             yield Label(self._title, id="dialog-title")
             yield Label("Name")
             yield UndoInput(value=self._name, id="name")
-            yield Label("Description")
-            yield TextArea(self._description, id="description")
             yield Label("Priority (1 = highest)")
             with RadioSet(id="priority"):
                 for p in range(1, 6):
@@ -200,7 +197,6 @@ class EditDialog(ModalScreen[dict | None]):
             return
         result = {
             "name": name,
-            "description": self.query_one("#description", TextArea).text.strip(),
             "priority": self.query_one("#priority", RadioSet).pressed_index + 1,
         }
         if self._status is not None:
@@ -893,7 +889,6 @@ class OrgTimeApp(App):
                 EditDialog(
                     f"Edit {kind}",
                     name=obj.name,
-                    description=obj.description,
                     priority=obj.priority,
                     status=obj.status if isinstance(obj, Task) else None,
                 ),

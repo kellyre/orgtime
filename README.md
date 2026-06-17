@@ -67,9 +67,9 @@ orgtime-curses.bat path\to\file.org
 ```
 
 Keys match the table below, with two differences forced by the terminal:
-**`u`** undoes and **`Ctrl+R`** redoes (terminals reserve `Ctrl+Z`), and
-multi-line editors (description, comments) save with **`Ctrl+G`**. Press
-**`?`** inside the app for the full key list.
+**`u`** undoes and **`Ctrl+R`** redoes (terminals reserve `Ctrl+Z`), and the
+multi-line comment editor saves with **`Ctrl+G`**. Press **`?`** inside the
+app for the full key list.
 
 ## Keys
 
@@ -126,10 +126,8 @@ make, then applies them on confirmation (Esc/No cancels the whole edit):
 
 ```
 * [#2] Project name
-  :DESCRIPTION: free text
 # comment attached to the project
 ** TODO [#1] Task name
-   :DESCRIPTION: free text
 # comment attached to the task
    CLOCK: [2026-06-09 Tue 09:00]--[2026-06-09 Tue 10:30] => 1:30
 # comment attached to that clock entry
@@ -141,7 +139,8 @@ make, then applies them on confirmation (Esc/No cancels the whole edit):
 - `[#N]` is priority 1–5 (1 highest).
 - Task status is one of `TODO`, `IN-PROGRESS`, `HOLD`, `CANCELLED`, `DONE`.
 - A `CLOCK:` line without an end timestamp is a running clock.
-- Multiple `:DESCRIPTION:` lines become a multi-line description.
+- Legacy `:DESCRIPTION:` lines from older files are migrated to comments on
+  load (descriptions are no longer a separate feature).
 - A line starting with a single `#` is a comment, attached to the nearest
   project/task/clock line above it. In the app, comments show under their
   owner and collapse with it; `m` adds or edits the block, and adjoining

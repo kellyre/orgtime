@@ -443,11 +443,15 @@ class CursesApp:
     # -- actions: items ----------------------------------------------------
 
     def new_project(self) -> None:
-        result = self.item_form("New project")
-        if result:
-            self.checkpoint()
-            self.doc.projects.append(Project(**result))
-            self.save_and_refresh()
+        name = self.prompt("New project name")
+        if name is None or not name.strip():
+            return
+        self.checkpoint()
+        project = Project(name=name.strip())
+        self.doc.projects.append(project)
+        self.save_and_refresh()
+        self._select_obj(project)
+        self.message = "Created project (1-5 sets priority)"
 
     def new_task(self) -> None:
         obj = self.selected_item()
@@ -456,12 +460,16 @@ class CursesApp:
         if project is None:
             self.message = "Select a project first"
             return
-        result = self.item_form(f"New task in {project.name}", status="TODO")
-        if result:
-            self.checkpoint()
-            project.tasks.append(Task(**result))
-            project.collapsed = False
-            self.save_and_refresh()
+        name = self.prompt(f"New task in {project.name}")
+        if name is None or not name.strip():
+            return
+        self.checkpoint()
+        task = Task(name=name.strip())
+        project.tasks.append(task)
+        project.collapsed = False
+        self.save_and_refresh()
+        self._select_obj(task)
+        self.message = "Created task (1-5 priority, t/T/D status)"
 
     def edit(self) -> None:
         obj = self.selected_obj()
@@ -470,17 +478,13 @@ class CursesApp:
         elif isinstance(obj, ClockEntry):
             self.edit_clock(obj)
         elif isinstance(obj, (Project, Task)):
-            is_task = isinstance(obj, Task)
-            result = self.item_form(
-                f"Edit {'task' if is_task else 'project'}",
-                name=obj.name, description=obj.description, priority=obj.priority,
-                status=obj.status if is_task else None,
-            )
-            if result:
-                self.checkpoint()
-                for key, value in result.items():
-                    setattr(obj, key, value)
-                self.save_and_refresh()
+            kind = "task" if isinstance(obj, Task) else "project"
+            name = self.prompt(f"Rename {kind}", obj.name)
+            if name is None or not name.strip():
+                return
+            self.checkpoint()
+            obj.name = name.strip()
+            self.save_and_refresh()
         else:
             self.message = "Nothing to edit"
 
@@ -878,34 +882,6 @@ class CursesApp:
                 d = int(ch)
                 if 1 <= d <= len(options):
                     index = d - 1
-
-    def item_form(self, title: str, *, name: str = "", description: str = "",
-                  priority: int = 3, status: str | None = None) -> dict | None:
-        """Collect fields for a project/task via a sequence of prompts."""
-        self.message = title
-        new_name = self.prompt("Name", name)
-        if new_name is None or not new_name.strip():
-            if new_name is not None:
-                self.message = "Name must not be empty — cancelled"
-            return None
-        new_desc = self.edit_multiline(
-            "Description (Ctrl+G save, Esc skip)", description)
-        if new_desc is None:
-            new_desc = description
-        else:
-            new_desc = new_desc.strip()
-        pri_idx = self.prompt_choice("Priority (1 = highest)",
-                                     [str(p) for p in range(1, 6)], priority - 1)
-        if pri_idx is None:
-            return None
-        result = {"name": new_name.strip(), "description": new_desc,
-                  "priority": pri_idx + 1}
-        if status is not None:
-            st_idx = self.prompt_choice("Status", STATUSES, STATUSES.index(status))
-            if st_idx is None:
-                return None
-            result["status"] = STATUSES[st_idx]
-        return result
 
     def edit_multiline(self, title: str, initial: str = "") -> str | None:
         """Full multi-line text editor.

@@ -54,14 +54,8 @@ async def run() -> None:
             task = app.doc.projects[0].tasks[0]
             assert task.name == "Design mockups"
 
-            # edit: tab from name into description TextArea, ctrl+s saves
-            select(app, task)
-            await pilot.press("e")
-            await pilot.press("tab", *"Figma work", "ctrl+s")
-            await pilot.pause()
-            assert task.description == "Figma work"
-
             # editing no longer select-alls: typing appends instead of wiping
+            select(app, task)
             await pilot.press("e")
             await pilot.press(*"XY")
             name_input = app.screen.query_one("#name")

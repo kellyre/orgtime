@@ -10,10 +10,8 @@ from orgtime.model import (
 
 SAMPLE = """\
 * [#2] Website Redesign
-  :DESCRIPTION: Client website overhaul
 # Client prefers blue tones
 ** IN-PROGRESS [#1] Design mockups
-   :DESCRIPTION: Figma mockups for homepage
 # Start with desktop layout
    CLOCK: [2026-06-09 Tue 09:00]--[2026-06-09 Tue 10:30] => 1:30
 # Header done
@@ -35,7 +33,6 @@ def test_roundtrip():
     assert len(doc.projects) == 2
     p = doc.projects[0]
     assert p.name == "Website Redesign" and p.priority == 2
-    assert p.description == "Client website overhaul"
     t = p.tasks[0]
     assert t.status == "IN-PROGRESS" and t.priority == 1
     assert len(t.clocks) == 2 and t.clocks[1].running
@@ -61,6 +58,28 @@ def test_comments_attach_to_nearest_item():
         "## ** TODO [#4] Old deleted task",
         "### deleted comment",
     ]
+
+
+def test_legacy_description_migrates_to_comments():
+    text = """\
+* [#2] Proj
+  :DESCRIPTION: project desc one
+  :DESCRIPTION: project desc two
+# real comment
+** TODO [#1] Task
+   :DESCRIPTION: task desc
+   CLOCK: [2026-06-09 Tue 09:00]--[2026-06-09 Tue 10:00] => 1:00
+"""
+    doc, issues = parse(text)
+    assert issues == []
+    p = doc.projects[0]
+    # description lines become comments, in order, before the real comment
+    assert p.comments == ["project desc one", "project desc two", "real comment"]
+    assert p.tasks[0].comments == ["task desc"]
+    # once saved, the file no longer contains :DESCRIPTION:
+    assert ":DESCRIPTION:" not in doc.serialize()
+    # and Project/Task no longer have a description attribute
+    assert not hasattr(p, "description")
 
 
 def test_expunge():
@@ -172,7 +191,8 @@ def test_parse_user_ts():
 
 
 if __name__ == "__main__":
-    for fn in [test_roundtrip, test_comments_attach_to_nearest_item, test_expunge,
+    for fn in [test_roundtrip, test_comments_attach_to_nearest_item,
+               test_legacy_description_migrates_to_comments, test_expunge,
                test_tombstoned_helper, test_clocking, test_format_issues_flagged,
                test_consistency, test_duration_format, test_plausibility_warnings,
                test_parse_user_ts]:
