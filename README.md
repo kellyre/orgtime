@@ -60,6 +60,7 @@ Press **`?`** inside the app for the full key list.
 | `X`       | Expunge: permanently remove all soft-deleted (`##`) lines     |
 | `J`       | Jump to the running clock entry (expands its project and task) |
 | `C`       | Collapse all projects                                        |
+| `z`       | Cycle project sort: file → priority → created → modified (view only) |
 | `space` / `enter` / `tab` | Collapse / expand the selected project or task |
 | `/`       | Search project/task names and comments; press `/` again to jump to the next match (loops); Esc cancels, leaving you on the current match |
 | `?`       | Show the in-app key list                                     |
@@ -94,8 +95,10 @@ make, then applies them on confirmation (Esc/No cancels the whole edit):
 
 ```
 * [#2] Project name
+  :CREATED: [2026-06-01 Mon 09:00] :MODIFIED: [2026-06-18 Thu 12:23]
 # comment attached to the project
 ** TODO [#1] Task name
+   :CREATED: [2026-06-01 Mon 09:30] :MODIFIED: [2026-06-18 Thu 12:23]
 # comment attached to the task
    CLOCK: [2026-06-09 Tue 09:00]--[2026-06-09 Tue 10:30] => 1:30
 # comment attached to that clock entry
@@ -106,6 +109,9 @@ make, then applies them on confirmation (Esc/No cancels the whole edit):
 
 - `[#N]` is priority 1–5 (1 highest).
 - Task status is one of `TODO`, `IN-PROGRESS`, `HOLD`, `CANCELLED`, `DONE`.
+- The `:CREATED:`/`:MODIFIED:` line (optional, auto-filled on load) tracks
+  when a project/task was made and last changed — see *Created / modified
+  times* below.
 - A `CLOCK:` line without an end timestamp is a running clock.
 - Legacy `:DESCRIPTION:` lines from older files are migrated to comments on
   load (descriptions are no longer a separate feature).
@@ -124,12 +130,36 @@ and task, and by day. A clock entry is counted, in full, on the date of its
 start timestamp; running clocks are counted up to generation time and listed
 in a note.
 
+### Created / modified times
+
+Each project and task carries a created and a modified timestamp, stored on a
+line under its header:
+
+```
+* [#2] Project name
+  :CREATED: [2026-06-01 Mon 09:00] :MODIFIED: [2026-06-18 Thu 12:23]
+```
+
+- On load, any project/task missing these defaults to its most recent clock
+  entry (for a project, across all its tasks), or the current time if it has
+  no clocks — so older files just work.
+- `modified` is bumped automatically when you create a task, or touch a clock,
+  comment, status, priority, name, or move (the change bubbles up to the
+  owning project too).
+- Both are plain text you can hand-edit. `e` on a project/task also lets you
+  fix `created` (e.g. for something created late) — keep the name with Enter,
+  then type a new created time.
+- `z` cycles the project sort (file → priority → created → modified). It's a
+  view-only sort: your file order on disk is untouched, and it resets to file
+  order on restart. When sorting by created/modified, that timestamp is shown
+  on each project line.
+
 ### Soft deletion
 
 Deleting anything in the app prepends `##` to its lines instead of removing
 them (a deleted `# comment` therefore becomes `###`). Lines starting with
 two or more `#` are invisible in the app but stay in the file, so nothing
-is ever lost: hand-remove the `##` and press `r` to resurrect something,
+is ever lost: hand-remove the `##` and press `L` to resurrect something,
 or press `X` to expunge all soft-deleted lines for good.
 
 Hand-edit freely, then press `L` to reload in the app. Malformed lines are

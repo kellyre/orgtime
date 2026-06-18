@@ -49,13 +49,35 @@ def _indent(depth: int) -> str:
     return "  " * depth
 
 
-def project_text(project: Project, now: datetime) -> str:
+SORT_MODES = ["file", "priority", "created", "modified"]
+
+
+def sorted_projects(doc: Document, mode: str) -> list[Project]:
+    """Projects in display order for the given sort mode (view-only)."""
+    projects = list(doc.projects)
+    if mode == "priority":
+        return sorted(projects, key=lambda p: (p.priority, p.name.lower()))
+    if mode == "created":  # oldest first
+        return sorted(projects, key=lambda p: (p.created or datetime.min,
+                                               p.name.lower()))
+    if mode == "modified":  # most recently changed first
+        return sorted(projects, key=lambda p: (p.modified or datetime.min,
+                                               p.name.lower()), reverse=True)
+    return projects  # "file"
+
+
+def project_text(project: Project, now: datetime, sort_mode: str = "file") -> str:
     marker = "+" if project.collapsed else "-"
     total = project.total_time(now)
     time_part = f"  {human_duration(total)}" if total else ""
     n = len(project.tasks)
+    stamp = ""
+    if sort_mode in ("created", "modified"):
+        ts = project.created if sort_mode == "created" else project.modified
+        if ts is not None:
+            stamp = f"  ({sort_mode[0]}:{ts:%Y-%m-%d %H:%M})"
     return (f"{marker} #{project.priority} {project.name}  "
-            f"({n} task{'s' if n != 1 else ''}){time_part}")
+            f"({n} task{'s' if n != 1 else ''}){time_part}{stamp}")
 
 
 def task_text(task: Task, now: datetime) -> str:
@@ -129,11 +151,13 @@ def next_match_index(targets: list[SearchTarget], term: str,
     return None
 
 
-def flatten(doc: Document, now: datetime | None = None) -> list[Row]:
+def flatten(doc: Document, now: datetime | None = None,
+            sort_mode: str = "file") -> list[Row]:
     """Walk the document into visible rows, honouring collapse state.
 
     Project.collapsed hides everything beneath it; Task.collapsed hides the
     task's comments, clock entries, and clock-attached comments.
+    ``sort_mode`` reorders projects for display only (see ``sorted_projects``).
     """
     now = now or datetime.now()
     rows: list[Row] = []
@@ -143,8 +167,9 @@ def flatten(doc: Document, now: datetime | None = None) -> list[Row]:
         for text in owner.comments:
             rows.append(Row(ref, COMMENT, depth, comment_text(text, depth)))
 
-    for project in doc.projects:
-        rows.append(Row(project, PROJECT, 0, project_text(project, now)))
+    for project in sorted_projects(doc, sort_mode):
+        rows.append(Row(project, PROJECT, 0,
+                        project_text(project, now, sort_mode)))
         if project.collapsed:
             continue
         add_comments(project, 1)
@@ -169,6 +194,7 @@ HELP_LINES = [
     "  Up/Down, j/k     move cursor      Home/End, g/G  top/bottom",
     "  Enter / Space    collapse/expand  Tab            collapse/expand",
     "  J                jump to running clock   C       collapse all projects",
+    "  z                sort projects (file/priority/created/modified)",
     "  /                search (repeat with /)  m       move task to project",
     "  N                new project      n              new task",
     "  e                edit item        d              delete (soft)",

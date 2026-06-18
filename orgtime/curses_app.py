@@ -45,6 +45,7 @@ from .report import build_report, default_filename
 from .view import (
     COMMENT,
     PROJECT,
+    SORT_MODES,
     TASK,
     CommentRef,
     HELP_LINES,
@@ -77,6 +78,7 @@ class CursesApp:
         self._redo: list[Document] = []
         self._running = True
         self.search_term = ""
+        self.sort_mode = "file"
 
     # -- setup -------------------------------------------------------------
 
@@ -121,7 +123,7 @@ class CursesApp:
         """Rebuild the visible-row list, keeping the cursor on the same item."""
         prev = self.selected_obj()
         prev_owner = prev.owner if isinstance(prev, CommentRef) else None
-        self.rows = flatten(self.doc)
+        self.rows = flatten(self.doc, sort_mode=self.sort_mode)
         if prev is not None:
             for i, row in enumerate(self.rows):
                 obj = row.obj
@@ -269,6 +271,8 @@ class CursesApp:
             self.jump_to_running()
         elif ch == "C":
             self.collapse_all()
+        elif ch == "z":
+            self.cycle_sort()
         elif ch == "/":
             self.search()
         elif ch == "m":
@@ -369,6 +373,15 @@ class CursesApp:
             self._select_obj(project)
         self.message = "Collapsed all projects"
 
+    def cycle_sort(self) -> None:
+        self.sort_mode = SORT_MODES[
+            (SORT_MODES.index(self.sort_mode) + 1) % len(SORT_MODES)]
+        self.refresh_rows()
+        labels = {"file": "file order", "priority": "priority (1 first)",
+                  "created": "created (oldest first)",
+                  "modified": "modified (newest first)"}
+        self.message = f"Sort: {labels[self.sort_mode]}"
+
     # -- search ------------------------------------------------------------
 
     def search(self) -> None:
@@ -436,18 +449,24 @@ class CursesApp:
         src.tasks.remove(task)
         dest.tasks.append(task)
         dest.collapsed = False
+        now = self._now()
+        task.modified = src.modified = dest.modified = now
         self.save_and_refresh()
         self._select_obj(task)
         self.message = f"Moved '{task.name}' to {dest.name}"
 
     # -- actions: items ----------------------------------------------------
 
+    def _now(self) -> datetime:
+        return datetime.now().replace(second=0, microsecond=0)
+
     def new_project(self) -> None:
         name = self.prompt("New project name")
         if name is None or not name.strip():
             return
         self.checkpoint()
-        project = Project(name=name.strip())
+        now = self._now()
+        project = Project(name=name.strip(), created=now, modified=now)
         self.doc.projects.append(project)
         self.save_and_refresh()
         self._select_obj(project)
@@ -464,12 +483,14 @@ class CursesApp:
         if name is None or not name.strip():
             return
         self.checkpoint()
-        task = Task(name=name.strip())
+        now = self._now()
+        task = Task(name=name.strip(), created=now, modified=now)
         project.tasks.append(task)
+        project.modified = now           # a new task modifies its project
         project.collapsed = False
         self.save_and_refresh()
         self._select_obj(task)
-        self.message = "Created task (1-5 priority, t/T/D status)"
+        self.message = "Created task (1-5 priority, s/S/D status)"
 
     def edit(self) -> None:
         obj = self.selected_obj()
@@ -482,8 +503,21 @@ class CursesApp:
             name = self.prompt(f"Rename {kind}", obj.name)
             if name is None or not name.strip():
                 return
+            # optionally fix the created time (e.g. project created late)
+            created = self.prompt(
+                "Created (YYYY-MM-DD HH:MM, blank = keep)",
+                obj.created.strftime("%Y-%m-%d %H:%M") if obj.created else "")
+            if created is None:
+                return
             self.checkpoint()
             obj.name = name.strip()
+            if created.strip():
+                new_created = parse_user_ts(created)
+                if new_created is None:
+                    self.message = "Invalid created time; name updated, date kept"
+                else:
+                    obj.created = new_created
+            self.doc.touch(obj)
             self.save_and_refresh()
         else:
             self.message = "Nothing to edit"
@@ -526,11 +560,15 @@ class CursesApp:
             self.checkpoint()
             clock.start, clock.end = start_dt, end_dt
             apply_overlap_changes(changes)
+            for c in changes:
+                self.doc.touch(c.clock)
+            self.doc.touch(clock)
             self.save_and_refresh()
             self.message = f"Edited time; adjusted {len(changes)} other entry(s)"
         else:
             self.checkpoint()
             clock.start, clock.end = start_dt, end_dt
+            self.doc.touch(clock)
             self.save_and_refresh()
         self.warn_about(clock)
 
@@ -557,14 +595,17 @@ class CursesApp:
             project = self.doc.project_of(obj)
             project.tombstones.extend(tombstoned(obj.lines()))
             project.tasks.remove(obj)
+            self.doc.touch(project)
         elif isinstance(obj, CommentRef):
             owner = obj.owner
             owner.tombstones.extend(tombstoned(comment_lines(owner.comments)))
             owner.comments.clear()
+            self.doc.touch(owner)
         else:
             task = self.doc.task_of(obj)
             task.tombstones.extend(tombstoned(obj.lines()))
             task.clocks.remove(obj)
+            self.doc.touch(task)
         self.save_and_refresh()
         self.message = "Deleted (kept as ## lines — press X to expunge)"
 
@@ -609,6 +650,7 @@ class CursesApp:
             task = self.doc.task_of(owner)
             task.collapsed = False
             self.doc.project_of(task).collapsed = False
+        self.doc.touch(owner)
         self.save_and_refresh()
 
     # -- actions: clocking -------------------------------------------------
@@ -620,6 +662,7 @@ class CursesApp:
             return
         self.checkpoint()
         self.doc.clock_in(task)
+        self.doc.touch(task)
         task.collapsed = False
         self.save_and_refresh()
         self.message = f"Clocked in: {task.name}"
@@ -632,6 +675,7 @@ class CursesApp:
         _, task, clock = active
         self.checkpoint()
         self.doc.clock_out()
+        self.doc.touch(task)
         self.save_and_refresh()
         self.message = f"Clocked out: {task.name}"
         self.warn_about(clock)
@@ -646,6 +690,7 @@ class CursesApp:
             return
         self.checkpoint()
         self.doc.clock_in(task, when)
+        self.doc.touch(task)
         task.collapsed = False
         self.save_and_refresh()
         self.message = f"Clocked in: {task.name} at {when:%H:%M}"
@@ -665,6 +710,7 @@ class CursesApp:
             return
         self.checkpoint()
         clock.end = when
+        self.doc.touch(task)
         self.save_and_refresh()
         self.message = f"Clocked out: {task.name} at {when:%H:%M}"
         self.warn_about(clock)
@@ -683,6 +729,7 @@ class CursesApp:
         self.checkpoint()
         self._set_status(
             task, STATUSES[(STATUSES.index(task.status) + step) % len(STATUSES)])
+        self.doc.touch(task)
         self.save_and_refresh()
 
     def mark_done(self) -> None:
@@ -697,6 +744,7 @@ class CursesApp:
             self.checkpoint()
             for task in obj.tasks:
                 self._set_status(task, "DONE")
+                self.doc.touch(task)
             self.save_and_refresh()
             self.message = f"Marked {n} task(s) DONE in {obj.name}"
             return
@@ -706,6 +754,7 @@ class CursesApp:
             return
         self.checkpoint()
         self._set_status(task, "DONE")
+        self.doc.touch(task)
         self.save_and_refresh()
         self.message = f"Marked DONE: {task.name}"
 
@@ -718,6 +767,7 @@ class CursesApp:
             return
         self.checkpoint()
         obj.priority = value
+        self.doc.touch(obj)
         self.save_and_refresh()
 
     # -- actions: misc -----------------------------------------------------

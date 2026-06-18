@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from orgtime.model import parse
+from orgtime.model import Document, parse
 from orgtime.view import (
     CLOCK,
     COMMENT,
@@ -134,6 +134,27 @@ def test_search_targets_finds_collapsed_content():
     assert any(t.text == "Design mockups" for t in targets)
 
 
+def test_sorted_projects():
+    from orgtime.view import sorted_projects
+    from orgtime.model import Project
+
+    a = Project(name="Alpha", priority=3,
+                created=datetime(2026, 6, 1), modified=datetime(2026, 6, 10))
+    b = Project(name="Beta", priority=1,
+                created=datetime(2026, 6, 5), modified=datetime(2026, 6, 2))
+    c = Project(name="Gamma", priority=2,
+                created=datetime(2026, 6, 3), modified=datetime(2026, 6, 20))
+    doc = Document(projects=[a, b, c])
+
+    assert [p.name for p in sorted_projects(doc, "file")] == ["Alpha", "Beta", "Gamma"]
+    assert [p.name for p in sorted_projects(doc, "priority")] == ["Beta", "Gamma", "Alpha"]
+    assert [p.name for p in sorted_projects(doc, "created")] == ["Alpha", "Gamma", "Beta"]
+    # modified: newest first
+    assert [p.name for p in sorted_projects(doc, "modified")] == ["Gamma", "Alpha", "Beta"]
+    # the doc's own order is untouched (view-only)
+    assert [p.name for p in doc.projects] == ["Alpha", "Beta", "Gamma"]
+
+
 def test_next_match_index_wraps_and_loops():
     doc, _ = parse(SAMPLE)
     targets = search_targets(doc)
@@ -159,6 +180,7 @@ if __name__ == "__main__":
                test_running_and_warn_flags, test_human_duration_in_totals,
                test_search_targets_order_and_kinds,
                test_search_targets_finds_collapsed_content,
+               test_sorted_projects,
                test_next_match_index_wraps_and_loops]:
         fn()
         print(f"PASS {fn.__name__}")

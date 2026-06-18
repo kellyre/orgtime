@@ -20,7 +20,7 @@ from datetime import datetime
 from orgtime import curses_app
 from orgtime.curses_app import CursesApp
 from orgtime.model import ClockEntry, Task, parse
-from orgtime.view import CommentRef
+from orgtime.view import PROJECT, CommentRef
 
 KEYS: deque = deque()
 
@@ -300,6 +300,31 @@ def _scenario(stdscr):
         body = report_file.read_text(encoding="utf-8")
         assert "orgtime time report" in body
         assert "By project" in body and "By day" in body
+
+        # -- created/modified bookkeeping + sort -------------------------
+        # creating + clocking the task bubbled modified up to its project
+        assert app.doc.projects[0].modified == rtask.modified
+
+        # sort cycles file -> priority -> created -> modified -> file
+        assert app.sort_mode == "file"
+        app.handle_key("z")
+        assert app.sort_mode == "priority"
+        app.handle_key("z")
+        assert app.sort_mode == "created"
+        app.handle_key("z")
+        assert app.sort_mode == "modified"
+        # newest-modified project is shown first
+        first_proj = next(r.obj for r in app.rows if r.kind == PROJECT)
+        assert first_proj is max(app.doc.projects, key=lambda p: p.modified)
+        app.handle_key("z")
+        assert app.sort_mode == "file"  # back to file order
+
+        # edit the created time via e (project created late): keep name, set date
+        select(app, app.doc.projects[0])
+        KEYS.extend(["\n"]                                    # keep name
+                    + ["\x15"] + chars("2020-01-01 08:00") + ["\n"])  # created
+        app.handle_key("e")
+        assert app.doc.projects[0].created == datetime(2020, 1, 1, 8, 0)
 
         # file on disk round-trips cleanly
         doc, issues = parse(path.read_text(encoding="utf-8"))

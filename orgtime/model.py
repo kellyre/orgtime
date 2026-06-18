@@ -47,6 +47,8 @@ _CLOCK_RE = re.compile(
 _PROJECT_RE = re.compile(r"^\*\s+(?:\[#(\d+)\]\s+)?(.+?)\s*$")
 _TASK_RE = re.compile(r"^\*\*\s+(?:(\S+)\s+)?(?:\[#(\d+)\]\s+)?(.+?)\s*$")
 _DESC_RE = re.compile(r"^\s*:DESCRIPTION:\s?(.*?)\s*$")
+_CREATED_RE = re.compile(r":CREATED:\s*" + _TS_RE)
+_MODIFIED_RE = re.compile(r":MODIFIED:\s*" + _TS_RE)
 
 
 def parse_user_ts(text: str, base: datetime | None = None) -> datetime | None:
@@ -159,11 +161,23 @@ class ClockEntry:
         return [f"   {self.serialize()}"] + comment_lines(self.comments) + self.tombstones
 
 
+def _meta_line(indent: str, created: datetime | None,
+               modified: datetime | None) -> list[str]:
+    parts = []
+    if created is not None:
+        parts.append(f":CREATED: {format_ts(created)}")
+    if modified is not None:
+        parts.append(f":MODIFIED: {format_ts(modified)}")
+    return [indent + " ".join(parts)] if parts else []
+
+
 @dataclass
 class Task:
     name: str
     status: str = "TODO"
     priority: int = 3
+    created: datetime | None = None
+    modified: datetime | None = None
     comments: list[str] = field(default_factory=list)
     tombstones: list[str] = field(default_factory=list)
     clocks: list[ClockEntry] = field(default_factory=list)
@@ -177,6 +191,7 @@ class Task:
 
     def lines(self) -> list[str]:
         out = [f"** {self.status} [#{self.priority}] {self.name}"]
+        out += _meta_line("   ", self.created, self.modified)
         out += comment_lines(self.comments)
         out += self.tombstones
         for clock in self.clocks:
@@ -188,6 +203,8 @@ class Task:
 class Project:
     name: str
     priority: int = 3
+    created: datetime | None = None
+    modified: datetime | None = None
     comments: list[str] = field(default_factory=list)
     tombstones: list[str] = field(default_factory=list)
     tasks: list[Task] = field(default_factory=list)
@@ -198,6 +215,7 @@ class Project:
 
     def lines(self) -> list[str]:
         out = [f"* [#{self.priority}] {self.name}"]
+        out += _meta_line("  ", self.created, self.modified)
         out += comment_lines(self.comments)
         out += self.tombstones
         for task in self.tasks:
@@ -230,6 +248,31 @@ class Document:
                 if clock in task.clocks:
                     return task
         return None
+
+    def project_of_clock(self, clock: ClockEntry) -> Project | None:
+        task = self.task_of(clock)
+        return self.project_of(task) if task else None
+
+    # -- modified-time bookkeeping ----------------------------------------
+
+    def touch(self, obj, now: datetime | None = None) -> None:
+        """Bump modified time on ``obj`` and its owning task/project.
+
+        ``obj`` may be a Project, Task, or ClockEntry. Touching a task or
+        clock also touches the owning project.
+        """
+        now = (now or datetime.now()).replace(second=0, microsecond=0)
+        if isinstance(obj, ClockEntry):
+            obj = self.task_of(obj)
+            if obj is None:
+                return
+        if isinstance(obj, Task):
+            obj.modified = now
+            project = self.project_of(obj)
+            if project is not None:
+                project.modified = now
+        elif isinstance(obj, Project):
+            obj.modified = now
 
     # -- clocking ---------------------------------------------------------
 
@@ -379,6 +422,17 @@ def parse(text: str) -> tuple[Document, list[str]]:
                 anchor = last_object if last_object is not None else doc
                 anchor.tombstones.append(stripped)
 
+        elif stripped.startswith(":CREATED:") or stripped.startswith(":MODIFIED:"):
+            if current is None:
+                issues.append(f"line {lineno}: created/modified before any project/task")
+                continue
+            cm = _CREATED_RE.search(line)
+            mm = _MODIFIED_RE.search(line)
+            if cm:
+                current.created = _parse_ts(cm.group(1), cm.group(3), lineno, issues)
+            if mm:
+                current.modified = _parse_ts(mm.group(1), mm.group(3), lineno, issues)
+
         elif _DESC_RE.match(line):
             # legacy :DESCRIPTION: lines are migrated to comments on the
             # nearest project/task (descriptions are no longer a feature)
@@ -418,12 +472,46 @@ def parse(text: str) -> tuple[Document, list[str]]:
     return doc, issues
 
 
+def _recent_clock_time(clocks: list[ClockEntry]) -> datetime | None:
+    times: list[datetime] = []
+    for clock in clocks:
+        times.append(clock.start)
+        if clock.end is not None:
+            times.append(clock.end)
+    return max(times) if times else None
+
+
+def resolve_times(doc: Document, now: datetime | None = None) -> None:
+    """Fill in any missing created/modified times in place.
+
+    A missing time defaults to the most recent clock timestamp of the item
+    (for a project, across all its tasks' clocks), or ``now`` if there are
+    no clocks.
+    """
+    now = (now or datetime.now()).replace(second=0, microsecond=0)
+    for project in doc.projects:
+        # project default = most recent ACTUAL clock across its tasks, else now
+        all_clocks = [c for task in project.tasks for c in task.clocks]
+        project_default = _recent_clock_time(all_clocks) or now
+        if project.created is None:
+            project.created = project_default
+        if project.modified is None:
+            project.modified = project_default
+        for task in project.tasks:
+            task_default = _recent_clock_time(task.clocks) or now
+            if task.created is None:
+                task.created = task_default
+            if task.modified is None:
+                task.modified = task_default
+
+
 def load(path: Path) -> tuple[Document, list[str]]:
     if path.exists():
         doc, issues = parse(path.read_text(encoding="utf-8"))
     else:
         doc, issues = Document(), []
     doc.path = path
+    resolve_times(doc)
     return doc, issues
 
 

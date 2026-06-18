@@ -82,6 +82,65 @@ def test_legacy_description_migrates_to_comments():
     assert not hasattr(p, "description")
 
 
+def test_created_modified_parse_serialize_resolve_touch():
+    from orgtime.model import resolve_times
+
+    text = """\
+* [#2] Proj
+  :CREATED: [2026-06-01 Mon 09:00] :MODIFIED: [2026-06-02 Tue 10:00]
+** TODO [#1] HasTimes
+   :CREATED: [2026-06-01 Mon 09:30] :MODIFIED: [2026-06-01 Mon 09:30]
+   CLOCK: [2026-06-05 Fri 08:00]--[2026-06-05 Fri 09:00] => 1:00
+** TODO [#3] NoTimes
+   CLOCK: [2026-06-07 Sun 08:00]--[2026-06-07 Sun 08:30] => 0:30
+"""
+    doc, issues = parse(text)
+    assert issues == []
+    p = doc.projects[0]
+    assert p.created == datetime(2026, 6, 1, 9, 0)
+    assert p.modified == datetime(2026, 6, 2, 10, 0)
+    has, no = p.tasks
+    assert has.created == datetime(2026, 6, 1, 9, 30)
+    assert no.created is None  # not yet resolved
+
+    # resolve fills missing times from the most recent clock (else now)
+    now = datetime(2026, 6, 18, 12, 0)
+    resolve_times(doc, now)
+    assert no.created == datetime(2026, 6, 7, 8, 30)   # its latest clock
+    assert no.modified == datetime(2026, 6, 7, 8, 30)
+    assert has.created == datetime(2026, 6, 1, 9, 30)  # kept, not overwritten
+
+    # serialize round-trips the timestamps
+    text2 = doc.serialize()
+    assert ":CREATED: [2026-06-01 Mon 09:00]" in text2
+    doc2, _ = parse(text2)
+    assert doc2.projects[0].created == p.created
+
+    # touch bumps task + its project; clock touch bubbles up too
+    doc.touch(has, now=datetime(2026, 6, 18, 13, 0))
+    assert has.modified == datetime(2026, 6, 18, 13, 0)
+    assert p.modified == datetime(2026, 6, 18, 13, 0)
+    doc.touch(no.clocks[0], now=datetime(2026, 6, 18, 14, 0))
+    assert no.modified == datetime(2026, 6, 18, 14, 0)
+    assert p.modified == datetime(2026, 6, 18, 14, 0)
+
+
+def test_resolve_project_default_ignores_clockless_task_now():
+    from orgtime.model import resolve_times
+
+    # a project whose tasks include one with clocks and one without should
+    # default its created to the real clock time, not "now"
+    text = """\
+* Proj
+** TODO WithClock
+   CLOCK: [2026-06-05 Fri 08:00]--[2026-06-05 Fri 09:00] => 1:00
+** TODO NoClock
+"""
+    doc, _ = parse(text)
+    resolve_times(doc, now=datetime(2026, 6, 18, 12, 0))
+    assert doc.projects[0].created == datetime(2026, 6, 5, 9, 0)
+
+
 def test_expunge():
     doc, _ = parse(SAMPLE)
     assert doc.tombstone_count() == 2
@@ -192,7 +251,10 @@ def test_parse_user_ts():
 
 if __name__ == "__main__":
     for fn in [test_roundtrip, test_comments_attach_to_nearest_item,
-               test_legacy_description_migrates_to_comments, test_expunge,
+               test_legacy_description_migrates_to_comments,
+               test_created_modified_parse_serialize_resolve_touch,
+               test_resolve_project_default_ignores_clockless_task_now,
+               test_expunge,
                test_tombstoned_helper, test_clocking, test_format_issues_flagged,
                test_consistency, test_duration_format, test_plausibility_warnings,
                test_parse_user_ts]:
