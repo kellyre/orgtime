@@ -30,6 +30,7 @@ from .model import (
     Project,
     Task,
     apply_overlap_changes,
+    apply_reshape,
     check_consistency,
     clock_warnings,
     comment_lines,
@@ -39,6 +40,7 @@ from .model import (
     overlap_changes,
     parse_user_date,
     parse_user_ts,
+    reshape_to_avoid,
     tombstoned,
 )
 from .report import build_report, default_filename
@@ -547,29 +549,61 @@ class CursesApp:
         changes = []
         if end_dt is not None:
             changes = overlap_changes(self.doc, clock, start_dt, end_dt)
-        if changes:
-            lines = ["This time overlaps other entries. Proposed changes:", ""]
-            lines += [" - " + describe_change(c) for c in changes]
-            if any(c.becomes_zero for c in changes):
-                lines += ["", "Entries marked 0:00 are fully covered and will "
-                          "be kept as zero-length slots."]
-            lines += ["", "Apply these changes to remove the overlap?"]
-            if not self.confirm_list("Resolve overlaps", lines):
-                self.message = "Edit cancelled (overlap not resolved)"
-                return
+        if not changes:
             self.checkpoint()
+            clock.start, clock.end = start_dt, end_dt
+            self.doc.touch(clock)
+            self.save_and_refresh()
+            self.warn_about(clock)
+            return
+
+        # overlap found: let the user choose which time takes precedence
+        pieces = reshape_to_avoid(self.doc, clock, start_dt, end_dt)
+
+        def fmt(s, e):
+            return f"{s:%Y-%m-%d %H:%M}--{e:%Y-%m-%d %H:%M}"
+
+        n = len(changes)
+        lines = [f"This time overlaps {n} other entr{'y' if n == 1 else 'ies'}."
+                 "  Whose time takes precedence?", ""]
+        lines.append("[e] This EDITED time wins — the others are adjusted:")
+        lines += ["      " + describe_change(c) for c in changes]
+        lines += ["", "[o] The OTHER entries win — this edited time is adjusted:"]
+        if not pieces:
+            lines.append("      this time -> 0:00 — WIPED OUT (possible typo)")
+        else:
+            lines.append("      this time -> " + "  +  ".join(
+                fmt(s, e) for s, e in pieces))
+        wipe_notes = []
+        if any(c.becomes_zero for c in changes):
+            wipe_notes.append("[e] wipes out another entry")
+        if not pieces:
+            wipe_notes.append("[o] wipes out this edit")
+        if wipe_notes:
+            lines += ["", "Note: " + "; ".join(wipe_notes)
+                      + " (0:00) — likely a typo."]
+        lines += ["", "e = edited wins    o = others win    Esc = cancel"]
+
+        choice = self.choose_precedence("Resolve overlap", lines)
+        if choice is None:
+            self.message = "Edit cancelled (overlap not resolved)"
+            return
+        self.checkpoint()
+        if choice == "e":
             clock.start, clock.end = start_dt, end_dt
             apply_overlap_changes(changes)
             for c in changes:
                 self.doc.touch(c.clock)
             self.doc.touch(clock)
-            self.save_and_refresh()
-            self.message = f"Edited time; adjusted {len(changes)} other entry(s)"
-        else:
-            self.checkpoint()
-            clock.start, clock.end = start_dt, end_dt
+            self.message = f"Edited time wins; adjusted {n} other entry(s)"
+        else:  # others win: reshape the edited entry around them
+            apply_reshape(self.doc, clock, pieces, start_dt)
             self.doc.touch(clock)
-            self.save_and_refresh()
+            self.message = ("Others win; this time wiped to 0:00"
+                            if not pieces else
+                            f"Others win; this time reshaped into "
+                            f"{len(pieces)} piece(s)")
+        self.save_and_refresh()
         self.warn_about(clock)
 
     def delete(self) -> None:
@@ -1098,6 +1132,41 @@ class CursesApp:
                 return True
             elif ch in ("n", "N", "\x1b"):
                 return False
+
+    def choose_precedence(self, title: str, lines: list[str]) -> str | None:
+        """Scrollable list with an e/o/Esc choice.
+
+        Returns "e" (edited wins), "o" (others win), or None (cancel).
+        """
+        maxy, maxx = self.stdscr.getmaxyx()
+        width = min(maxx - 2, max([len(title)] + [len(s) for s in lines]) + 6)
+        width = max(width, 40)
+        height = min(maxy - 2, len(lines) + 4)
+        win = self._centered_win(height, width)
+        h, w = win.getmaxyx()
+        win.addstr(0, 2, f" {title[: w - 6]} ")
+        offset = 0
+        body = h - 3
+        while True:
+            for i in range(body):
+                win.addstr(i + 1, 2, " " * (w - 4))
+                if offset + i < len(lines):
+                    win.addstr(i + 1, 2, str(lines[offset + i])[: w - 4])
+            footer = "e/o choose, Esc cancel" + (
+                "   (Up/Down scroll)" if len(lines) > body else "")
+            win.addstr(h - 1, 2, footer[: w - 4])
+            win.refresh()
+            ch = win.get_wch()
+            if ch == curses.KEY_DOWN and offset + body < len(lines):
+                offset += 1
+            elif ch == curses.KEY_UP and offset > 0:
+                offset -= 1
+            elif ch in ("e", "E"):
+                return "e"
+            elif ch in ("o", "O"):
+                return "o"
+            elif ch == "\x1b":
+                return None
 
     def show_report(self, title: str, lines, plain: bool = False) -> None:
         maxy, maxx = self.stdscr.getmaxyx()

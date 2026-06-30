@@ -585,20 +585,76 @@ def apply_overlap_changes(changes: list[ClockChange]) -> None:
             change.task.clocks.insert(idx + 1, extra)
 
 
-def describe_change(change: ClockChange) -> str:
-    def short(dt: datetime) -> str:
-        return dt.strftime("%Y-%m-%d %H:%M")
+def _short_ts(dt: datetime) -> str:
+    return dt.strftime("%Y-%m-%d %H:%M")
 
+
+def describe_change(change: ClockChange) -> str:
     head = (f"{change.project.name} / {change.task.name}: "
-            f"{short(change.old_start)}--{short(change.old_end)} -> ")
+            f"{_short_ts(change.old_start)}--{_short_ts(change.old_end)} -> ")
     if change.split_extra is not None:
         s2, e2 = change.split_extra
-        return (head + f"split into {short(change.new_start)}--{short(change.new_end)}"
-                f" and {short(s2)}--{short(e2)}")
+        return (head + f"split into {_short_ts(change.new_start)}--"
+                f"{_short_ts(change.new_end)} and {_short_ts(s2)}--{_short_ts(e2)}")
     if change.becomes_zero:
-        return head + f"{short(change.new_start)}--{short(change.new_end)} "\
-                      f"(0:00, fully covered)"
-    return head + f"{short(change.new_start)}--{short(change.new_end)}"
+        return head + "0:00 — WIPED OUT (possible typo)"
+    return head + f"{_short_ts(change.new_start)}--{_short_ts(change.new_end)}"
+
+
+def _subtract_intervals(base: tuple[datetime, datetime],
+                        holes: list[tuple[datetime, datetime]]):
+    """Return the positive-length pieces of ``base`` not covered by ``holes``."""
+    s, e = base
+    clipped = sorted((max(s, a), min(e, b)) for a, b in holes
+                     if max(s, a) < min(e, b))
+    pieces = []
+    cursor = s
+    for a, b in clipped:
+        if a > cursor:
+            pieces.append((cursor, a))
+        cursor = max(cursor, b)
+    if cursor < e:
+        pieces.append((cursor, e))
+    return pieces
+
+
+def reshape_to_avoid(doc: "Document", edited: "ClockEntry",
+                     new_start: datetime, new_end: datetime):
+    """Plan for the *others-win* case: the pieces the edited entry must shrink
+    to so it sits in the gaps between the other (unchanged) entries.
+
+    Returns a list of (start, end) pieces; an empty list means the edited
+    interval is fully covered by others and would be wiped out (0:00).
+    """
+    holes = []
+    for project in doc.projects:
+        for task in project.tasks:
+            for clock in task.clocks:
+                if clock is edited or clock.end is None:
+                    continue
+                if clock.start < new_end and new_start < clock.end:
+                    holes.append((clock.start, clock.end))
+    return _subtract_intervals((new_start, new_end), holes)
+
+
+def apply_reshape(doc: "Document", edited: "ClockEntry",
+                  pieces: list[tuple[datetime, datetime]],
+                  fallback_start: datetime) -> None:
+    """Apply an others-win plan to the edited entry in place.
+
+    The edited entry becomes the first piece; any further pieces are added as
+    new clock entries on its task. No pieces => the entry is wiped to a
+    zero-length slot at ``fallback_start``.
+    """
+    task = doc.task_of(edited)
+    if not pieces:
+        edited.start = edited.end = fallback_start
+        return
+    edited.start, edited.end = pieces[0]
+    if task is not None:
+        idx = task.clocks.index(edited)
+        for offset, (start, end) in enumerate(pieces[1:], start=1):
+            task.clocks.insert(idx + offset, ClockEntry(start=start, end=end))
 
 
 # -- consistency check ------------------------------------------------------

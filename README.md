@@ -83,13 +83,19 @@ task and press `e` on the CLOCK line.
 
 Because you can only do one thing at a time, two clock entries should never
 overlap. When editing a CLOCK line creates an overlap with any entry in any
-task or project, the app lists every affected entry and the change it would
-make, then applies them on confirmation (Esc/No cancels the whole edit):
+task or project, a popup lists the conflict and asks **whose time takes
+precedence** (`Esc` cancels the whole edit):
 
-- an entry overlapping on one side is trimmed back to the edge;
-- an entry that fully surrounds the new interval is split into two;
-- an entry entirely covered collapses to a zero-length (`0:00`) slot — you're
-  told this will happen and it proceeds only if you confirm.
+- **`e` — the edited time wins**: the other entries are adjusted. An entry
+  overlapping on one side is trimmed to the edge; an entry that fully
+  surrounds the edit is split in two; an entry entirely covered is wiped to
+  `0:00`.
+- **`o` — the other entries win**: they stay put and the edited time is
+  trimmed (or split, if an entry sits inside it) to fit the gaps; if the edit
+  is fully covered it is wiped to `0:00`.
+
+Either way, the popup flags any entry that would be **wiped out to `0:00`**,
+since that usually means a mistyped time.
 
 ## File format
 

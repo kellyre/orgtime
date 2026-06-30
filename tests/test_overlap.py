@@ -4,9 +4,11 @@ from datetime import datetime
 
 from orgtime.model import (
     apply_overlap_changes,
+    apply_reshape,
     describe_change,
     overlap_changes,
     parse,
+    reshape_to_avoid,
 )
 
 
@@ -138,6 +140,57 @@ def test_describe_change_readable():
     changes = overlap_changes(doc, edited, dt(10, 9), dt(10, 10))
     text = describe_change(changes[0])
     assert "B / T2" in text and "split into" in text
+
+
+def test_describe_change_flags_wipeout():
+    # other 09:30-10:00 fully inside edited 09:00-11:00 -> wiped
+    doc = make(("A", "T1", 14, 15))
+    other_doc = make(("B", "T2", 9, 10))
+    doc.projects.append(other_doc.projects[0])
+    o = doc.projects[1].tasks[0].clocks[0]
+    o.start, o.end = dt(10, 9, 30), dt(10, 10)
+    edited = doc.projects[0].tasks[0].clocks[0]
+    changes = overlap_changes(doc, edited, dt(10, 9), dt(10, 11))
+    text = describe_change(changes[0])
+    assert "WIPED OUT" in text and "typo" in text
+
+
+def test_others_win_trims_the_edited_entry():
+    # edited 09:30-11:00 overlaps other 10:00-12:00 on the right;
+    # under "others win", the edited entry trims to 09:30-10:00
+    doc = make(("A", "Edit", 20, 21), ("B", "Other", 10, 12))
+    edited = doc.projects[0].tasks[0].clocks[0]
+    pieces = reshape_to_avoid(doc, edited, dt(10, 9, 30), dt(10, 11))
+    assert pieces == [(dt(10, 9, 30), dt(10, 10))]
+    apply_reshape(doc, edited, pieces, dt(10, 9, 30))
+    assert (edited.start, edited.end) == (dt(10, 9, 30), dt(10, 10))
+    # the other entry is untouched
+    other = doc.projects[1].tasks[0].clocks[0]
+    assert (other.start, other.end) == (dt(10, 10), dt(10, 12))
+
+
+def test_others_win_splits_edited_around_contained_entry():
+    # other 10:00-10:30 sits inside edited 09:00-12:00 -> edited splits
+    doc = make(("A", "Edit", 20, 21), ("B", "Mid", 10, 11))
+    edited = doc.projects[0].tasks[0].clocks[0]
+    other = doc.projects[1].tasks[0].clocks[0]
+    other.start, other.end = dt(10, 10), dt(10, 10, 30)
+    task = doc.projects[0].tasks[0]
+    pieces = reshape_to_avoid(doc, edited, dt(10, 9), dt(10, 12))
+    assert pieces == [(dt(10, 9), dt(10, 10)), (dt(10, 10, 30), dt(10, 12))]
+    apply_reshape(doc, edited, pieces, dt(10, 9))
+    spans = sorted((c.start, c.end) for c in task.clocks)
+    assert spans == [(dt(10, 9), dt(10, 10)), (dt(10, 10, 30), dt(10, 12))]
+
+
+def test_others_win_wipes_edited_when_fully_covered():
+    # edited 10:00-10:30 sits fully inside other 09:00-12:00 -> wiped
+    doc = make(("A", "Edit", 20, 21), ("B", "Big", 9, 12))
+    edited = doc.projects[0].tasks[0].clocks[0]
+    pieces = reshape_to_avoid(doc, edited, dt(10, 10), dt(10, 10, 30))
+    assert pieces == []  # fully covered -> wiped (likely typo)
+    apply_reshape(doc, edited, pieces, dt(10, 10))
+    assert edited.start == edited.end == dt(10, 10)
 
 
 if __name__ == "__main__":

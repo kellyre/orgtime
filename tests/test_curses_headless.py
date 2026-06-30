@@ -163,25 +163,39 @@ def _scenario(stdscr):
                        end=datetime(2026, 7, 1, 12, 0)))
         app.doc.save()
         app.refresh_rows()
+        clock_b = task_b.clocks[0]
         clock_a = task.clocks[0]
+
+        # (1) EDITED WINS: end 10:00 -> 11:30 overlaps Temp B; choose 'e'
         select(app, clock_a)
-        # edit end 10:00 -> 11:30 (overlaps Temp B); confirm the fix with 'y'
         KEYS.extend(["\n"]                                   # accept start
                     + ["\x15"] + chars("2026-07-01 11:30") + ["\n"]  # new end
-                    + ["y"])                                 # confirm overlap fix
+                    + ["e"])                                 # edited time wins
         app.handle_key("e")
         assert clock_a.end == datetime(2026, 7, 1, 11, 30)
         # Temp B was trimmed at the start to remove the overlap
-        assert task_b.clocks[0].start == datetime(2026, 7, 1, 11, 30)
-        assert task_b.clocks[0].end == datetime(2026, 7, 1, 12, 0)
-        # cancelling instead leaves everything unchanged
+        assert clock_b.start == datetime(2026, 7, 1, 11, 30)
+        assert clock_b.end == datetime(2026, 7, 1, 12, 0)
+
+        # (2) OTHERS WIN: end -> 11:45 overlaps Temp B; choose 'o'
         select(app, clock_a)
-        KEYS.extend(["\n"]                                   # accept start
-                    + ["\x15"] + chars("2026-07-01 11:45") + ["\n"]  # new end
-                    + ["n"])                                 # decline the fix
+        KEYS.extend(["\n"]
+                    + ["\x15"] + chars("2026-07-01 11:45") + ["\n"]
+                    + ["o"])                                 # other entries win
+        app.handle_key("e")
+        # the edited entry was trimmed back; Temp B is untouched
+        assert clock_a.end == datetime(2026, 7, 1, 11, 30)
+        assert clock_b.start == datetime(2026, 7, 1, 11, 30)
+        assert clock_b.end == datetime(2026, 7, 1, 12, 0)
+
+        # (3) CANCEL: Esc leaves everything unchanged
+        select(app, clock_a)
+        KEYS.extend(["\n"]
+                    + ["\x15"] + chars("2026-07-01 11:50") + ["\n"]
+                    + ["\x1b"])                              # cancel
         app.handle_key("e")
         assert clock_a.end == datetime(2026, 7, 1, 11, 30)   # unchanged
-        assert task_b.clocks[0].start == datetime(2026, 7, 1, 11, 30)
+        assert clock_b.start == datetime(2026, 7, 1, 11, 30)
         # remove the temp task to restore the scenario state
         project.tasks.remove(task_b)
         app.doc.save()
