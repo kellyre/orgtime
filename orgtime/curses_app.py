@@ -447,8 +447,8 @@ class CursesApp:
         if not others:
             self.message = "No other project to move to"
             return
-        idx = self.prompt_choice(f"Move '{task.name}' to project",
-                                 [p.name for p in others], 0)
+        idx = self.prompt_list_choice(f"Move '{task.name}' to project",
+                                      [p.name for p in others], 0)
         if idx is None:
             return
         dest = others[idx]
@@ -993,11 +993,11 @@ class CursesApp:
                 return "quit"
 
     def _choose_project(self):
-        names = [p.name for p in self.doc.projects] + ["(new project)"]
-        idx = self.prompt_choice("Import into project", names, 0)
+        names = ["+ New project"] + [p.name for p in self.doc.projects]
+        idx = self.prompt_list_choice("Import into project", names, 0)
         if idx is None:
             return None
-        if idx == len(self.doc.projects):
+        if idx == 0:  # New at the top
             name = self.prompt("New project name")
             if name is None or not name.strip():
                 return None
@@ -1005,14 +1005,14 @@ class CursesApp:
             project = Project(name=name.strip(), created=now, modified=now)
             self.doc.projects.append(project)
             return project
-        return self.doc.projects[idx]
+        return self.doc.projects[idx - 1]
 
     def _choose_task(self, project, default_name: str):
-        names = [t.name for t in project.tasks] + ["(new task)"]
-        idx = self.prompt_choice(f"Task in {project.name}", names, 0)
+        names = ["+ New task"] + [t.name for t in project.tasks]
+        idx = self.prompt_list_choice(f"Task in {project.name}", names, 0)
         if idx is None:
             return None
-        if idx == len(project.tasks):
+        if idx == 0:  # New at the top
             name = self.prompt("New task name", default_name)
             if name is None or not name.strip():
                 return None
@@ -1022,7 +1022,7 @@ class CursesApp:
             project.modified = now
             project.collapsed = False
             return task
-        return project.tasks[idx]
+        return project.tasks[idx - 1]
 
     def _import_event(self, event, project, task) -> bool:
         """Write one calendar event as a clock on ``task``.  Returns True if
@@ -1145,36 +1145,54 @@ class CursesApp:
             self.message = "Invalid time; try again"
             default = raw
 
-    def prompt_choice(self, label: str, options: list[str], index: int) -> int | None:
-        """Left/Right (or number) to pick; Enter accepts; Esc cancels."""
-        win = self._centered_win(5, max(40, len(label) + 6, sum(len(o) for o in options) + 10))
+    def prompt_list_choice(self, label: str, options: list[str],
+                           index: int = 0) -> int | None:
+        """Vertical scrolling chooser (one option per line).
+
+        Up/Down (or j/k) move, Enter selects, Esc cancels; g/G jump to the
+        ends. Returns the chosen index, or None on Esc.
+        """
+        maxy, maxx = self.stdscr.getmaxyx()
+        width = min(maxx - 2, max([len(label)] + [len(o) for o in options]) + 8)
+        width = max(width, 34)
+        height = min(maxy - 2, len(options) + 3)
+        win = self._centered_win(height, width)
         h, w = win.getmaxyx()
-        win.addstr(1, 2, label[: w - 4])
-        win.addstr(3, 2, "<-/-> choose, Enter ok, Esc cancel"[: w - 4])
+        win.addstr(0, 2, f" {label[: w - 6]} ")
+        view_h = h - 2                 # option rows (1 .. h-2); h-1 is the hint
+        offset = 0
         while True:
-            x = 2
-            win.move(2, 2)
-            win.addstr(2, 2, " " * (w - 4))
-            x = 2
-            for i, opt in enumerate(options):
-                attr = curses.A_REVERSE if i == index else curses.A_NORMAL
-                if x + len(opt) < w - 2:
-                    win.addstr(2, x, opt, attr)
-                    x += len(opt) + 2
+            if index < offset:
+                offset = index
+            elif index >= offset + view_h:
+                offset = index - view_h + 1
+            for i in range(view_h):
+                oi = offset + i
+                win.addstr(i + 1, 1, " " * (w - 2))
+                if oi < len(options):
+                    attr = curses.A_REVERSE if oi == index else curses.A_NORMAL
+                    marker = "> " if oi == index else "  "
+                    win.addstr(i + 1, 2, (marker + options[oi])[: w - 4], attr)
+            more = "  (more)" if len(options) > view_h else ""
+            win.addstr(h - 1, 2, ("Up/Down select, Esc cancel" + more)[: w - 4])
             win.refresh()
             ch = win.get_wch()
-            if ch == "\x1b":
-                return None
-            if ch in ("\n", "\r", curses.KEY_ENTER):
-                return index
-            if ch == curses.KEY_LEFT:
+            if ch in (curses.KEY_UP, "k"):
                 index = (index - 1) % len(options)
-            elif ch == curses.KEY_RIGHT:
+            elif ch in (curses.KEY_DOWN, "j"):
                 index = (index + 1) % len(options)
-            elif isinstance(ch, str) and ch.isdigit():
-                d = int(ch)
-                if 1 <= d <= len(options):
-                    index = d - 1
+            elif ch == curses.KEY_NPAGE:
+                index = min(len(options) - 1, index + view_h)
+            elif ch == curses.KEY_PPAGE:
+                index = max(0, index - view_h)
+            elif ch in (curses.KEY_HOME, "g"):
+                index = 0
+            elif ch in (curses.KEY_END, "G"):
+                index = len(options) - 1
+            elif ch in ("\n", "\r", curses.KEY_ENTER):
+                return index
+            elif ch == "\x1b":
+                return None
 
     def edit_multiline(self, title: str, initial: str = "") -> str | None:
         """Full multi-line text editor.

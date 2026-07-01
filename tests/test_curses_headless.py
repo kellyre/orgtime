@@ -371,20 +371,26 @@ def _scenario_import(stdscr):
         app.refresh_rows()
 
         # import: csv path, blackout code (default 4), blank start/end (= all),
-        # then for CTOP 6/4: keep -> project Work (idx0) -> task Meetings (idx0)
+        # then for CTOP 6/4: keep -> "+ New project" (top) -> "+ New task" (top)
         KEYS.extend(chars(str(csv_path)) + ["\n"])   # csv path
         KEYS.extend(["\n"])                           # blackout code = 4
         KEYS.extend(["\n", "\n"])                     # start/end blank -> all
         KEYS.extend(["k"])                            # keep this entry
-        KEYS.extend(["\n"])                           # project: Work (idx 0)
-        KEYS.extend(["\n"])                           # task: Meetings (idx 0)
+        KEYS.extend(["\n"] + chars("Calendar") + ["\n"])  # New project (top) + name
+        KEYS.extend(["\n", "\n"])                     # New task (top) + accept subject
         app.handle_key("A")
+        # a new project/task was created (New is at the top of the chooser)
+        cal = next(p for p in app.doc.projects if p.name == "Calendar")
+        ctask = cal.tasks[0]
+        assert ctask.name == "CTOP Dashboard"       # task name defaults to subject
         # only CTOP 6/4 imported: 6/5 is masked by the all-day blackout "Maine"
-        assert len(task.clocks) == 1, [c.start for c in task.clocks]
-        c = task.clocks[0]
+        assert len(ctask.clocks) == 1, [c.start for c in ctask.clocks]
+        c = ctask.clocks[0]
         assert c.start == datetime(2026, 6, 4, 14, 0)
         assert c.end == datetime(2026, 6, 4, 15, 0)
         assert "1 added" in app.message
+        # the pre-existing task was left alone
+        assert task.clocks == []
 
         # a backup of the file was written under backups/
         assert list((path.parent / "backups").glob("timelog_*.org"))
@@ -392,7 +398,7 @@ def _scenario_import(stdscr):
         # re-import the same range -> exact duplicate is auto-skipped
         KEYS.extend(chars(str(csv_path)) + ["\n", "\n", "\n", "\n"])
         app.handle_key("A")
-        assert len(task.clocks) == 1
+        assert len(ctask.clocks) == 1
         assert "1 duplicate" in app.message
 
 
