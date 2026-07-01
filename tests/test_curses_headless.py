@@ -19,7 +19,15 @@ from datetime import datetime
 
 from orgtime import curses_app
 from orgtime.curses_app import CursesApp
-from orgtime.model import ClockEntry, Task, parse
+from orgtime.model import ClockEntry, Project, Task, parse
+
+SAMPLE_CSV = (
+    "Subject,  Start Date,Start Time,End Date,End Time,All day event,"
+    "Meeting Organizer,Show time as\n"
+    'CTOP Dashboard,6/4/2026,2:00:00 PM,6/4/2026,3:00:00 PM,FALSE,"Kelly, Reed",2\n'
+    'CTOP Dashboard,6/5/2026,2:00:00 PM,6/5/2026,3:00:00 PM,FALSE,"Kelly, Reed",2\n'
+    'Maine,6/5/2026,12:00:00 AM,6/6/2026,12:00:00 AM,TRUE,"Kelly, Reed",4\n'
+)
 from orgtime.view import PROJECT, CommentRef
 
 KEYS: deque = deque()
@@ -345,8 +353,60 @@ def _scenario(stdscr):
         assert issues == [], issues
 
 
+def _scenario_import(stdscr):
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "timelog.org"
+        csv_path = Path(tmp) / "cal.csv"
+        csv_path.write_text(SAMPLE_CSV, encoding="utf-8")
+        app = CursesApp(stdscr, path)
+        curses.curs_set(0)
+        app._init_colors()
+        # pre-create a project + task to import into
+        now = app._now()
+        proj = Project(name="Work", created=now, modified=now)
+        task = Task(name="Meetings", created=now, modified=now)
+        proj.tasks.append(task)
+        app.doc.projects.append(proj)
+        app.doc.save()
+        app.refresh_rows()
+
+        # import: csv path, blackout code (default 4), blank start/end (= all),
+        # then for CTOP 6/4: keep -> project Work (idx0) -> task Meetings (idx0)
+        KEYS.extend(chars(str(csv_path)) + ["\n"])   # csv path
+        KEYS.extend(["\n"])                           # blackout code = 4
+        KEYS.extend(["\n", "\n"])                     # start/end blank -> all
+        KEYS.extend(["k"])                            # keep this entry
+        KEYS.extend(["\n"])                           # project: Work (idx 0)
+        KEYS.extend(["\n"])                           # task: Meetings (idx 0)
+        app.handle_key("A")
+        # only CTOP 6/4 imported: 6/5 is masked by the all-day blackout "Maine"
+        assert len(task.clocks) == 1, [c.start for c in task.clocks]
+        c = task.clocks[0]
+        assert c.start == datetime(2026, 6, 4, 14, 0)
+        assert c.end == datetime(2026, 6, 4, 15, 0)
+        assert "1 added" in app.message
+
+        # a backup of the file was written under backups/
+        assert list((path.parent / "backups").glob("timelog_*.org"))
+
+        # re-import the same range -> exact duplicate is auto-skipped
+        KEYS.extend(chars(str(csv_path)) + ["\n", "\n", "\n", "\n"])
+        app.handle_key("A")
+        assert len(task.clocks) == 1
+        assert "1 duplicate" in app.message
+
+
 def main():
-    curses.wrapper(scenario)
+    def run_all(stdscr):
+        real_newwin = curses.newwin
+        curses.newwin = lambda *a, **k: WinProxy(real_newwin(*a, **k))
+        try:
+            _scenario(WinProxy(stdscr))
+            KEYS.clear()
+            _scenario_import(WinProxy(stdscr))
+        finally:
+            curses.newwin = real_newwin
+    curses.wrapper(run_all)
     print("PASS curses headless end-to-end test")
 
 

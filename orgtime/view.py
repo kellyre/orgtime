@@ -195,6 +195,7 @@ HELP_LINES = [
     "  Enter / Space    collapse/expand  Tab            collapse/expand",
     "  J                jump to running clock   C       collapse all projects",
     "  z                sort projects (file/priority/created/modified)",
+    "  A                import Outlook calendar CSV (appointments)",
     "  /                search (repeat with /)  m       move task to project",
     "  N                new project      n              new task",
     "  e                edit item        d              delete (soft)",

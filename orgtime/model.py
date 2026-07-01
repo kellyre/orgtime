@@ -253,6 +253,16 @@ class Document:
         task = self.task_of(clock)
         return self.project_of(task) if task else None
 
+    def find_clock(self, start: datetime, end: datetime) -> ClockEntry | None:
+        """An existing closed clock with exactly these start/end times, if any
+        (used to skip re-importing a duplicate calendar entry)."""
+        for project in self.projects:
+            for task in project.tasks:
+                for clock in task.clocks:
+                    if clock.start == start and clock.end == end:
+                        return clock
+        return None
+
     # -- modified-time bookkeeping ----------------------------------------
 
     def touch(self, obj, now: datetime | None = None) -> None:
@@ -513,6 +523,21 @@ def load(path: Path) -> tuple[Document, list[str]]:
     doc.path = path
     resolve_times(doc)
     return doc, issues
+
+
+def make_backup(path: Path | None) -> Path | None:
+    """Copy ``path`` to backups/<stem>_<YYYYMMDD-HHMMSS><suffix>.
+
+    Returns the backup path, or None if there was nothing to back up.
+    """
+    if path is None or not path.exists():
+        return None
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    backups = path.parent / "backups"
+    backups.mkdir(exist_ok=True)
+    dest = backups / f"{path.stem}_{stamp}{path.suffix}"
+    dest.write_bytes(path.read_bytes())
+    return dest
 
 
 # -- overlap resolution -----------------------------------------------------

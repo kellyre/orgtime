@@ -37,12 +37,14 @@ from .model import (
     describe_change,
     format_ts,
     load,
+    make_backup,
     overlap_changes,
     parse_user_date,
     parse_user_ts,
     reshape_to_avoid,
     tombstoned,
 )
+from .calimport import parse_csv, plan_import
 from .report import build_report, default_filename
 from .view import (
     COMMENT,
@@ -88,6 +90,7 @@ class CursesApp:
         curses.curs_set(0)
         self.stdscr.keypad(True)
         self._init_colors()
+        make_backup(self.doc.path)  # snapshot the file as it was at launch
         self.refresh_rows()
         if self.load_issues:
             self.show_report("Problems while loading file", self.load_issues)
@@ -275,6 +278,8 @@ class CursesApp:
             self.collapse_all()
         elif ch == "z":
             self.cycle_sort()
+        elif ch == "A":
+            self.import_calendar()
         elif ch == "/":
             self.search()
         elif ch == "m":
@@ -854,6 +859,210 @@ class CursesApp:
             self.message = f"Could not write report: {exc}"
             return
         self.message = f"Wrote report to {out_path}"
+
+    # -- calendar import ---------------------------------------------------
+
+    def import_calendar(self) -> None:
+        csv_path = self.prompt("Import calendar CSV (path)")
+        if csv_path is None or not csv_path.strip():
+            return
+        try:
+            text = Path(csv_path.strip()).read_text(encoding="utf-8-sig")
+        except OSError as exc:
+            self.message = f"Could not read CSV: {exc}"
+            return
+        events, issues = parse_csv(text)
+        if not events:
+            self.show_report("Calendar import", issues or ["No events found."],
+                             plain=True)
+            return
+
+        raw_code = self.prompt("Blackout status code (Out of Office)", "4")
+        if raw_code is None:
+            return
+        try:
+            blackout_code = int(raw_code.strip())
+        except ValueError:
+            blackout_code = 4
+
+        starts = [e.start.date() for e in events]
+        start = self.prompt_date("Import start")
+        if start is _CANCEL:
+            return
+        if start is None:
+            start = min(starts)
+        end = self.prompt_date("Import end")
+        if end is _CANCEL:
+            return
+        if end is None:
+            end = max(starts)
+        if end < start:
+            self.message = "End date is before start date"
+            return
+
+        plan = plan_import(events, start, end, blackout_code)
+        if not plan.candidates:
+            self.show_report("Calendar import", [
+                f"No import candidates in {start}..{end}.",
+                f"({len(plan.ignored_blackout)} masked by blackout windows)"]
+                + issues, plain=True)
+            return
+
+        make_backup(self.doc.path)
+        self.checkpoint()
+        self._run_import(plan, blackout_code)
+
+    def _run_import(self, plan, blackout_code: int) -> None:
+        all_targets: dict = {}      # subject -> (project, task) for "all"
+        ignore_subjects: set = set()
+        imported = skipped = ignored = dup = 0
+
+        for event in plan.candidates:
+            if event.subject in ignore_subjects:
+                ignored += 1
+                continue
+            if self.doc.find_clock(event.start, event.end) is not None:
+                dup += 1                 # already imported earlier — skip
+                continue
+
+            if event.subject in all_targets:
+                project, task = all_targets[event.subject]
+                if self._import_event(event, project, task):
+                    imported += 1
+                else:
+                    skipped += 1
+                continue
+
+            choice = self._import_choice(event, blackout_code)
+            if choice == "quit":
+                break
+            if choice == "skip":
+                skipped += 1
+                continue
+            if choice == "ignore_all":
+                ignore_subjects.add(event.subject)
+                ignored += 1
+                continue
+            # keep or all -> pick destination
+            project = self._choose_project()
+            if project is None:
+                skipped += 1
+                continue
+            task = self._choose_task(project, default_name=event.subject)
+            if task is None:
+                skipped += 1
+                continue
+            if choice == "all":
+                all_targets[event.subject] = (project, task)
+            if self._import_event(event, project, task):
+                imported += 1
+            else:
+                skipped += 1
+
+        self.save_and_refresh()
+        self.message = (f"Import done: {imported} added, {skipped} skipped, "
+                        f"{ignored} ignored, {dup} duplicate(s)")
+
+    def _import_choice(self, event, blackout_code: int) -> str:
+        lines = [
+            f"Subject : {event.subject}",
+            f"When    : {event.start:%Y-%m-%d %H:%M}--{event.end:%Y-%m-%d %H:%M}",
+            f"Status  : {event.status_label(blackout_code)}",
+            "",
+            "k = keep (import this one)",
+            "a = all (import every entry with this subject)",
+            "s = skip this entry",
+            "i = ignore all with this subject",
+            "q = quit importing",
+        ]
+        win = self._centered_win(len(lines) + 4,
+                                 max(46, max(len(s) for s in lines) + 6))
+        h, w = win.getmaxyx()
+        win.addstr(0, 2, " Calendar entry ")
+        for i, line in enumerate(lines):
+            win.addstr(i + 1, 2, line[: w - 4])
+        win.addstr(h - 1, 2, "k/a/s/i/q"[: w - 4])
+        win.refresh()
+        keymap = {"k": "keep", "a": "all", "s": "skip", "i": "ignore_all",
+                  "q": "quit"}
+        while True:
+            ch = win.get_wch()
+            if isinstance(ch, str) and ch in keymap:
+                return keymap[ch]
+            if ch == "\x1b":
+                return "quit"
+
+    def _choose_project(self):
+        names = [p.name for p in self.doc.projects] + ["(new project)"]
+        idx = self.prompt_choice("Import into project", names, 0)
+        if idx is None:
+            return None
+        if idx == len(self.doc.projects):
+            name = self.prompt("New project name")
+            if name is None or not name.strip():
+                return None
+            now = self._now()
+            project = Project(name=name.strip(), created=now, modified=now)
+            self.doc.projects.append(project)
+            return project
+        return self.doc.projects[idx]
+
+    def _choose_task(self, project, default_name: str):
+        names = [t.name for t in project.tasks] + ["(new task)"]
+        idx = self.prompt_choice(f"Task in {project.name}", names, 0)
+        if idx is None:
+            return None
+        if idx == len(project.tasks):
+            name = self.prompt("New task name", default_name)
+            if name is None or not name.strip():
+                return None
+            now = self._now()
+            task = Task(name=name.strip(), created=now, modified=now)
+            project.tasks.append(task)
+            project.modified = now
+            project.collapsed = False
+            return task
+        return project.tasks[idx]
+
+    def _import_event(self, event, project, task) -> bool:
+        """Write one calendar event as a clock on ``task``.  Returns True if
+        imported, False if the user skipped it at the overlap popup."""
+        clock = ClockEntry(start=event.start, end=event.end)
+        task.clocks.append(clock)
+        changes = overlap_changes(self.doc, clock, event.start, event.end)
+        if not changes:
+            self.doc.touch(clock)
+            return True
+
+        pieces = reshape_to_avoid(self.doc, clock, event.start, event.end)
+
+        def fmt(s, e):
+            return f"{s:%Y-%m-%d %H:%M}--{e:%Y-%m-%d %H:%M}"
+
+        n = len(changes)
+        lines = [f"'{event.subject}' overlaps {n} existing entr"
+                 f"{'y' if n == 1 else 'ies'}.  Whose time wins?", ""]
+        lines.append("[e] This imported time wins — the others are adjusted:")
+        lines += ["      " + describe_change(c) for c in changes]
+        lines += ["", "[o] The existing entries win — this import is adjusted:"]
+        lines.append("      this time -> " + (
+            "0:00 — WIPED OUT (possible typo)" if not pieces
+            else "  +  ".join(fmt(s, e) for s, e in pieces)))
+        lines += ["", "e = imported wins   o = existing win   Esc = skip entry"]
+
+        choice = self.choose_precedence("Import overlap", lines)
+        if choice is None:                 # Esc -> skip this entry
+            task.clocks.remove(clock)
+            return False
+        if choice == "e":
+            apply_overlap_changes(changes)
+            for c in changes:
+                self.doc.touch(c.clock)
+            self.doc.touch(clock)
+        else:                              # existing win: reshape the import
+            apply_reshape(self.doc, clock, pieces, event.start)
+            self.doc.touch(clock)
+        return True
 
     def reload(self) -> None:
         self.checkpoint()

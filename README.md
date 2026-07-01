@@ -61,6 +61,7 @@ Press **`?`** inside the app for the full key list.
 | `J`       | Jump to the running clock entry (expands its project and task) |
 | `C`       | Collapse all projects                                        |
 | `z`       | Cycle project sort: file → priority → created → modified (view only) |
+| `A`       | Import an Outlook calendar CSV export as clock entries         |
 | `space` / `enter` / `tab` | Collapse / expand the selected project or task |
 | `/`       | Search project/task names and comments; press `/` again to jump to the next match (loops); Esc cancels, leaving you on the current match |
 | `?`       | Show the in-app key list                                     |
@@ -159,6 +160,39 @@ line under its header:
   view-only sort: your file order on disk is untouched, and it resets to file
   order on restart. When sorting by created/modified, that timestamp is shown
   on each project line.
+
+### Calendar import
+
+Press `A` to import clock entries from an Outlook calendar CSV export. You're
+prompted for the CSV path, the **blackout status code** (`Show time as` value
+that means Out of Office — `4` on legacy tenants, `3` on newer ones), and a
+start/end date range (blank = the full span of the file). Only entries whose
+**start date** is in range are considered.
+
+The importer reads the `Subject`, `Start/End Date/Time`, `All day event`, and
+`Show time as` columns (matched by name, extra columns ignored):
+
+- **Blackout windows** are computed first from every event with the blackout
+  status. Any other event overlapping a blackout window is silently ignored
+  (e.g. a meeting during an all-day "Out of Office" trip).
+- **All-day events are never imported** as clocks — they only serve as
+  blackout windows.
+- Each remaining candidate (in chronological order) is offered with its
+  subject, time, and status, and you choose: **k** keep, **a** all (import
+  every entry with this subject to the same project/task), **s** skip, **i**
+  ignore all with this subject, or **q** quit.
+- **keep**/**all** then ask which project and task to import into (or make a
+  new one, defaulting the task name to the subject).
+- An entry that exactly matches an existing clock is auto-skipped, so
+  re-importing the same range doesn't create duplicates.
+- If an import overlaps an existing entry, the same precedence popup as time
+  editing appears (`e` imported wins, `o` existing wins, `Esc` skip this one).
+
+### Backups
+
+The file is copied to `backups/<name>_<YYYYMMDD-HHMMSS>.org` each time the app
+starts and again when an import begins, so you can roll back. (Cleanup of old
+backups is up to you for now.)
 
 ### Soft deletion
 

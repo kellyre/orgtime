@@ -7,3 +7,4 @@ build/
 .eggs/
 screenshot.svg
 orgtime-report-*.txt
+backups/
