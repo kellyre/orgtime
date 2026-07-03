@@ -9,7 +9,7 @@ plain-text label for each row.  The curses layer adds colour on top.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, time
 
 from .model import (
     ClockEntry,
@@ -22,6 +22,62 @@ from .model import (
 )
 
 PROJECT, TASK, CLOCK, COMMENT = "project", "task", "clock", "comment"
+
+# default workday window for the timeline view (9 to 5)
+WORKDAY_START = 9
+WORKDAY_END = 17
+
+ENTRY, GAP = "entry", "gap"
+
+
+@dataclass
+class TimelineRow:
+    kind: str            # ENTRY | GAP
+    start: datetime
+    end: datetime
+    task: Task | None = None
+    project: Project | None = None
+    clock: ClockEntry | None = None
+
+    @property
+    def duration(self):
+        return self.end - self.start
+
+
+def timeline_rows(doc: Document, day: date,
+                  start_hour: int = WORKDAY_START, end_hour: int = WORKDAY_END,
+                  now: datetime | None = None):
+    """Rows for the timeline view of ``day`` between the workday hours.
+
+    Returns (rows, window_start, window_end). Each clock intersecting the
+    window becomes an ENTRY row (clipped to the window); the uncovered spans
+    between them become GAP rows. A running clock is clipped to ``now``.
+    """
+    now = now or datetime.now()
+    window_start = datetime.combine(day, time(start_hour, 0))
+    window_end = datetime.combine(day, time(end_hour, 0))
+
+    occupied = []
+    for project in doc.projects:
+        for task in project.tasks:
+            for clock in task.clocks:
+                end = clock.end if clock.end is not None else now
+                s = max(clock.start, window_start)
+                e = min(end, window_end)
+                if s < e:
+                    occupied.append((s, e, clock, task, project))
+    occupied.sort(key=lambda item: (item[0], item[1]))
+
+    rows: list[TimelineRow] = []
+    cursor = window_start
+    for s, e, clock, task, project in occupied:
+        if s > cursor:
+            rows.append(TimelineRow(GAP, cursor, s))
+        rows.append(TimelineRow(ENTRY, s, e, task, project, clock))
+        cursor = max(cursor, e)
+    if cursor < window_end:
+        rows.append(TimelineRow(GAP, cursor, window_end))
+    return rows, window_start, window_end
 
 
 class CommentRef:
@@ -196,6 +252,7 @@ HELP_LINES = [
     "  J                jump to running clock   C       collapse all projects",
     "  z                sort projects (file/priority/created/modified)",
     "  A                import Outlook calendar CSV (appointments)",
+    "  t                timeline for a day: show gaps, add entries in a gap",
     "  /                search (repeat with /)  m       move task to project",
     "  N                new project      n              new task",
     "  e                edit item        d              delete (soft)",

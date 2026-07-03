@@ -62,6 +62,7 @@ Press **`?`** inside the app for the full key list.
 | `C`       | Collapse all projects                                        |
 | `z`       | Cycle project sort: file → priority → created → modified (view only) |
 | `A`       | Import an Outlook calendar CSV export as clock entries         |
+| `t`       | Timeline mode: one day's workday with gaps, to fill gaps       |
 | `space` / `enter` / `tab` | Collapse / expand the selected project or task |
 | `/`       | Search project/task names and comments; press `/` again to jump to the next match (loops); Esc cancels, leaving you on the current match |
 | `?`       | Show the in-app key list                                     |
@@ -160,6 +161,20 @@ line under its header:
   view-only sort: your file order on disk is untouched, and it resets to file
   order on restart. When sorting by created/modified, that timestamp is shown
   on each project line.
+
+### Timeline mode
+
+Press `t` for a full-screen timeline of a single day's workday (9–5 for now),
+laid out chronologically as your clock entries interleaved with the **gaps**
+between them (gaps are highlighted). A header shows the day and how much was
+worked vs. free.
+
+- Up/Down (or `j`/`k`) move the cursor; `[` / `]` step to the previous/next
+  day; `g` jumps to a date; `u` undoes; `q`/`Esc` returns to the tree.
+- Select a **gap** and press `a` (or Enter) to add an entry in it: type the
+  start/end (defaulting to the whole gap, and constrained to stay inside it),
+  then pick a project and task (or make new ones). The gap shrinks, so you
+  can keep adding more entries into what's left.
 
 ### Calendar import
 

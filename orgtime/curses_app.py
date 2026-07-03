@@ -19,7 +19,7 @@ from __future__ import annotations
 import copy
 import curses
 import sys
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from .model import (
@@ -48,6 +48,8 @@ from .calimport import parse_csv, plan_import
 from .report import build_report, default_filename
 from .view import (
     COMMENT,
+    ENTRY,
+    GAP,
     PROJECT,
     SORT_MODES,
     TASK,
@@ -56,6 +58,7 @@ from .view import (
     flatten,
     next_match_index,
     search_targets,
+    timeline_rows,
 )
 
 UNDO_LIMIT = 100
@@ -280,6 +283,8 @@ class CursesApp:
             self.cycle_sort()
         elif ch == "A":
             self.import_calendar()
+        elif ch == "t":
+            self.timeline_mode()
         elif ch == "/":
             self.search()
         elif ch == "m":
@@ -859,6 +864,135 @@ class CursesApp:
             self.message = f"Could not write report: {exc}"
             return
         self.message = f"Wrote report to {out_path}"
+
+    # -- timeline mode -----------------------------------------------------
+
+    def timeline_mode(self) -> None:
+        """Full-screen view of one day's workday with entries and gaps.
+
+        Navigate rows; on a gap press 'a' (or Enter) to add an entry; '['/']'
+        change day, 'g' jumps to a date, 'u' undoes, 'q'/Esc returns.
+        """
+        day = date.today()
+        cursor = 0
+        while True:
+            rows, ws, we = timeline_rows(self.doc, day)
+            cursor = max(0, min(cursor, len(rows) - 1))
+            self._draw_timeline(day, rows, ws, we, cursor)
+            ch = self.stdscr.get_wch()
+
+            if ch in (curses.KEY_UP, "k"):
+                cursor = max(0, cursor - 1)
+            elif ch in (curses.KEY_DOWN, "j"):
+                cursor = min(len(rows) - 1, cursor + 1)
+            elif ch == curses.KEY_HOME:
+                cursor = 0
+            elif ch == curses.KEY_END:
+                cursor = len(rows) - 1
+            elif ch == "[":
+                day -= timedelta(days=1)
+                cursor = 0
+            elif ch == "]":
+                day += timedelta(days=1)
+                cursor = 0
+            elif ch == "g":
+                when = self.prompt_date("Go to date")
+                if when not in (None, _CANCEL):
+                    day = when
+                    cursor = 0
+            elif ch == "u":
+                self.action_undo()
+            elif ch in ("a", "\n", "\r", curses.KEY_ENTER):
+                if 0 <= cursor < len(rows) and rows[cursor].kind == GAP:
+                    self._add_in_gap(rows[cursor])
+                else:
+                    self.message = "Select a gap to add an entry"
+            elif ch in ("q", "Q", "\x1b"):
+                break
+            elif ch == curses.KEY_RESIZE:
+                pass
+        self.refresh_rows()
+        self.message = "Left timeline"
+
+    def _draw_timeline(self, day, rows, ws, we, cursor) -> None:
+        from .model import human_duration
+        self.stdscr.erase()
+        height, width = self.stdscr.getmaxyx()
+        worked = sum((r.duration for r in rows if r.kind == ENTRY), timedelta())
+        free = sum((r.duration for r in rows if r.kind == GAP), timedelta())
+        header = (f" Timeline — {day:%a %Y-%m-%d}   "
+                  f"workday {ws:%H:%M}-{we:%H:%M} ")
+        summary = (f" worked {human_duration(worked)}   free {human_duration(free)}"
+                   f"   ({sum(1 for r in rows if r.kind == GAP)} gap(s)) ")
+        try:
+            self.stdscr.addstr(0, 0, header[: width - 1], self.color(CP_BAR))
+            self.stdscr.addstr(1, 0, summary[: width - 1])
+        except curses.error:
+            pass
+
+        body_top = 3
+        body = height - body_top - 1
+        top = max(0, cursor - body + 1) if cursor >= body else 0
+        for i in range(body):
+            idx = top + i
+            if idx >= len(rows):
+                break
+            row = rows[idx]
+            span = f"{row.start:%H:%M}-{row.end:%H:%M}"
+            dur = human_duration(row.duration)
+            if row.kind == GAP:
+                text = f"  {span}  {'─' * 6} GAP {dur} {'─' * 6}"
+                attr = self.color(CP_WARN, bold=True)
+            else:
+                label = f"{row.task.name} ({row.project.name})" if row.task else ""
+                text = f"  {span}  {label}   [{dur}]"
+                attr = self.color(CP_STATUS)
+            if idx == cursor:
+                attr |= curses.A_REVERSE
+                text = text.ljust(width - 1)
+            try:
+                self.stdscr.addstr(body_top + i, 0, text[: width - 1], attr)
+            except curses.error:
+                pass
+
+        footer = ("a/Enter add in gap   [ ] prev/next day   g goto date   "
+                  "u undo   q back")
+        try:
+            self.stdscr.addstr(height - 1, 0, footer[: width - 1], self.color(CP_BAR))
+        except curses.error:
+            pass
+        self.stdscr.refresh()
+
+    def _add_in_gap(self, gap) -> None:
+        gs, ge = gap.start, gap.end
+        s_raw = self.prompt(f"Entry start (in {gs:%H:%M}-{ge:%H:%M})",
+                            gs.strftime("%H:%M"))
+        if s_raw is None:
+            return
+        start = parse_user_ts(s_raw, base=gs)
+        e_raw = self.prompt("Entry end", ge.strftime("%H:%M"))
+        if e_raw is None:
+            return
+        end = parse_user_ts(e_raw, base=gs)
+        if start is None or end is None:
+            self.message = "Invalid time"
+            return
+        if not (gs <= start < end <= ge):
+            self.message = f"Entry must be within the gap {gs:%H:%M}-{ge:%H:%M}"
+            return
+        project = self._choose_project()
+        if project is None:
+            return
+        task = self._choose_task(project, default_name="")
+        if task is None:
+            return
+        self.checkpoint()
+        clock = ClockEntry(start=start, end=end)
+        task.clocks.append(clock)
+        task.collapsed = False
+        self.doc.touch(clock)
+        self.doc.save()
+        self.message = f"Added {start:%H:%M}-{end:%H:%M} to {task.name}"
 
     # -- calendar import ---------------------------------------------------
 

@@ -15,7 +15,7 @@ import tempfile
 from collections import deque
 from pathlib import Path
 
-from datetime import datetime
+from datetime import date, datetime, time
 
 from orgtime import curses_app
 from orgtime.curses_app import CursesApp
@@ -402,6 +402,35 @@ def _scenario_import(stdscr):
         assert "1 duplicate" in app.message
 
 
+def _scenario_timeline(stdscr):
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "timelog.org"
+        app = CursesApp(stdscr, path)
+        curses.curs_set(0)
+        app._init_colors()
+        now = app._now()
+        proj = Project(name="Work", created=now, modified=now)
+        task = Task(name="Meetings", created=now, modified=now)
+        proj.tasks.append(task)
+        app.doc.projects.append(proj)
+        app.doc.save()
+        app.refresh_rows()
+
+        today = date.today()
+        # timeline opens on today (one empty 9-17 gap); add 09:00-10:00 into it,
+        # choosing existing Work/Meetings (one row below the "+ New" top row)
+        KEYS.extend(["a", "\n"]                            # add; accept start 09:00
+                    + ["\x15"] + chars("10:00") + ["\n"]   # end -> 10:00
+                    + [curses.KEY_DOWN, "\n"]              # project: Work
+                    + [curses.KEY_DOWN, "\n"]              # task: Meetings
+                    + ["q"])                               # leave timeline
+        app.handle_key("t")
+        assert len(task.clocks) == 1, [c.start for c in task.clocks]
+        c = task.clocks[0]
+        assert c.start == datetime.combine(today, time(9, 0))
+        assert c.end == datetime.combine(today, time(10, 0))
+
+
 def main():
     def run_all(stdscr):
         real_newwin = curses.newwin
@@ -410,6 +439,8 @@ def main():
             _scenario(WinProxy(stdscr))
             KEYS.clear()
             _scenario_import(WinProxy(stdscr))
+            KEYS.clear()
+            _scenario_timeline(WinProxy(stdscr))
         finally:
             curses.newwin = real_newwin
     curses.wrapper(run_all)

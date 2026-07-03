@@ -155,6 +155,48 @@ def test_sorted_projects():
     assert [p.name for p in doc.projects] == ["Alpha", "Beta", "Gamma"]
 
 
+def test_timeline_rows_gaps_and_entries():
+    from datetime import date
+    from orgtime.view import ENTRY, GAP, timeline_rows
+
+    text = """\
+* P
+** TODO T
+   CLOCK: [2026-06-15 Mon 10:00]--[2026-06-15 Mon 11:00] => 1:00
+   CLOCK: [2026-06-15 Mon 13:00]--[2026-06-15 Mon 14:30] => 1:30
+   CLOCK: [2026-06-16 Tue 09:30]--[2026-06-16 Tue 10:00] => 0:30
+"""
+    doc, _ = parse(text)
+    now = datetime(2026, 6, 18, 12, 0)
+    rows, ws, we = timeline_rows(doc, date(2026, 6, 15), now=now)
+    assert (ws.hour, we.hour) == (9, 17)
+    # 9-10 gap, 10-11 entry, 11-13 gap, 13-14:30 entry, 14:30-17 gap
+    kinds = [(r.kind, r.start.strftime("%H:%M"), r.end.strftime("%H:%M")) for r in rows]
+    assert kinds == [
+        (GAP, "09:00", "10:00"),
+        (ENTRY, "10:00", "11:00"),
+        (GAP, "11:00", "13:00"),
+        (ENTRY, "13:00", "14:30"),
+        (GAP, "14:30", "17:00"),
+    ]
+    # the 6/16 clock is on another day and not shown
+    assert all(r.start.date() == date(2026, 6, 15) for r in rows)
+    # entries carry their task/project
+    entry = next(r for r in rows if r.kind == ENTRY)
+    assert entry.task is doc.projects[0].tasks[0]
+
+
+def test_timeline_empty_day_is_one_gap():
+    from datetime import date
+    from orgtime.view import GAP, timeline_rows
+
+    doc, _ = parse("* P\n** TODO T\n")
+    rows, ws, we = timeline_rows(doc, date(2026, 6, 15),
+                                 now=datetime(2026, 6, 18, 12, 0))
+    assert len(rows) == 1 and rows[0].kind == GAP
+    assert rows[0].start == ws and rows[0].end == we
+
+
 def test_next_match_index_wraps_and_loops():
     doc, _ = parse(SAMPLE)
     targets = search_targets(doc)
@@ -181,6 +223,8 @@ if __name__ == "__main__":
                test_search_targets_order_and_kinds,
                test_search_targets_finds_collapsed_content,
                test_sorted_projects,
+               test_timeline_rows_gaps_and_entries,
+               test_timeline_empty_day_is_one_gap,
                test_next_match_index_wraps_and_loops]:
         fn()
         print(f"PASS {fn.__name__}")
