@@ -9,7 +9,7 @@ plain-text label for each row.  The curses layer adds colour on top.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 
 from .model import (
     ClockEntry,
@@ -23,9 +23,10 @@ from .model import (
 
 PROJECT, TASK, CLOCK, COMMENT = "project", "task", "clock", "comment"
 
-# default workday window for the timeline view (9 to 5)
-WORKDAY_START = 9
-WORKDAY_END = 17
+# fallback workday window for the timeline view, used only if no config
+# default is supplied (see orgtime.config for the persisted default)
+WORKDAY_START = 7
+WORKDAY_END = 18
 
 ENTRY, GAP = "entry", "gap"
 
@@ -78,6 +79,34 @@ def timeline_rows(doc: Document, day: date,
     if cursor < window_end:
         rows.append(TimelineRow(GAP, cursor, window_end))
     return rows, window_start, window_end
+
+
+def timeline_hidden_counts(doc: Document, day: date, window_start: datetime,
+                           window_end: datetime,
+                           now: datetime | None = None) -> tuple[int, int]:
+    """Count clock entries touching ``day`` that fall entirely outside the
+    given window — (count entirely before it, count entirely after it).
+
+    Used to hint that widening the timeline window (earlier/later) would
+    reveal more entries, e.g. an early clock-in or a late clock-out.
+    """
+    now = now or datetime.now()
+    day_start = datetime.combine(day, time(0, 0))
+    day_end = day_start + timedelta(days=1)
+    before = after = 0
+    for project in doc.projects:
+        for task in project.tasks:
+            for clock in task.clocks:
+                end = clock.end if clock.end is not None else now
+                s = max(clock.start, day_start)
+                e = min(end, day_end)
+                if s >= e:
+                    continue  # doesn't touch this day
+                if e <= window_start:
+                    before += 1
+                elif s >= window_end:
+                    after += 1
+    return before, after
 
 
 class CommentRef:
@@ -253,6 +282,7 @@ HELP_LINES = [
     "  z                sort projects (file/priority/created/modified)",
     "  A                import Outlook calendar CSV (appointments)",
     "  t                timeline for a day: show gaps, add entries in a gap",
+    "     in timeline:  < > widen window   R reset   W save as default",
     "  /                search (repeat with /)  m       move task to project",
     "  N                new project      n              new task",
     "  e                edit item        d              delete (soft)",

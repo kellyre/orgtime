@@ -408,27 +408,45 @@ def _scenario_timeline(stdscr):
         app = CursesApp(stdscr, path)
         curses.curs_set(0)
         app._init_colors()
+        assert app.config.workday_start == 7 and app.config.workday_end == 18
         now = app._now()
         proj = Project(name="Work", created=now, modified=now)
         task = Task(name="Meetings", created=now, modified=now)
         proj.tasks.append(task)
         app.doc.projects.append(proj)
+        # an entry before the default 7-18 window, to exercise the
+        # hidden-entries hint (drawn for real, not just unit-tested)
+        today = date.today()
+        task.clocks.append(ClockEntry(
+            start=datetime.combine(today, time(5, 0)),
+            end=datetime.combine(today, time(5, 30))))
         app.doc.save()
         app.refresh_rows()
 
-        today = date.today()
-        # timeline opens on today (one empty 9-17 gap); add 09:00-10:00 into it,
+        # timeline opens on today; add 09:00-10:00 into the one big gap,
         # choosing existing Work/Meetings (one row below the "+ New" top row)
-        KEYS.extend(["a", "\n"]                            # add; accept start 09:00
-                    + ["\x15"] + chars("10:00") + ["\n"]   # end -> 10:00
+        KEYS.extend(["a"]
+                    + ["\x15"] + chars("09:00") + ["\n"]   # explicit start
+                    + ["\x15"] + chars("10:00") + ["\n"]   # explicit end
                     + [curses.KEY_DOWN, "\n"]              # project: Work
-                    + [curses.KEY_DOWN, "\n"]              # task: Meetings
-                    + ["q"])                               # leave timeline
+                    + [curses.KEY_DOWN, "\n"])             # task: Meetings
+        # widen the window, reset it, widen again, then save as the default
+        KEYS.extend(["<", "<", ">", "R"])                  # widen then reset (no-op'd)
+        KEYS.extend(["<", ">", "W"])                       # widen once each way, save
+        KEYS.extend(["q"])                                 # leave timeline
         app.handle_key("t")
-        assert len(task.clocks) == 1, [c.start for c in task.clocks]
-        c = task.clocks[0]
-        assert c.start == datetime.combine(today, time(9, 0))
-        assert c.end == datetime.combine(today, time(10, 0))
+
+        assert len(task.clocks) == 2, [c.start for c in task.clocks]
+        added = task.clocks[1]
+        assert added.start == datetime.combine(today, time(9, 0))
+        assert added.end == datetime.combine(today, time(10, 0))
+
+        # R reset the widen before saving, so the persisted default is the
+        # original 7/18 widened by exactly one hour each way -> 6/19
+        assert app.config.workday_start == 6 and app.config.workday_end == 19
+        from orgtime.config import load_config
+        on_disk = load_config(path)
+        assert on_disk.workday_start == 6 and on_disk.workday_end == 19
 
 
 def main():

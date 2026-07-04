@@ -45,6 +45,7 @@ from .model import (
     tombstoned,
 )
 from .calimport import parse_csv, plan_import
+from .config import Config, load_config, save_config
 from .report import build_report, default_filename
 from .view import (
     COMMENT,
@@ -58,6 +59,7 @@ from .view import (
     flatten,
     next_match_index,
     search_targets,
+    timeline_hidden_counts,
     timeline_rows,
 )
 
@@ -86,6 +88,7 @@ class CursesApp:
         self._running = True
         self.search_term = ""
         self.sort_mode = "file"
+        self.config = load_config(path)
 
     # -- setup -------------------------------------------------------------
 
@@ -871,14 +874,22 @@ class CursesApp:
         """Full-screen view of one day's workday with entries and gaps.
 
         Navigate rows; on a gap press 'a' (or Enter) to add an entry; '['/']'
-        change day, 'g' jumps to a date, 'u' undoes, 'q'/Esc returns.
+        change day, 'g' jumps to a date, '<'/'>' widen the window earlier/
+        later (beyond the configured default), 'R' resets the window, 'W'
+        saves the current window as the new default, 'u' undoes, 'q'/Esc
+        returns.
         """
         day = date.today()
         cursor = 0
+        start_hour = self.config.workday_start
+        end_hour = self.config.workday_end
         while True:
-            rows, ws, we = timeline_rows(self.doc, day)
+            rows, ws, we = timeline_rows(self.doc, day, start_hour, end_hour)
+            hidden_before, hidden_after = timeline_hidden_counts(
+                self.doc, day, ws, we)
             cursor = max(0, min(cursor, len(rows) - 1))
-            self._draw_timeline(day, rows, ws, we, cursor)
+            self._draw_timeline(day, rows, ws, we, cursor,
+                               hidden_before, hidden_after)
             ch = self.stdscr.get_wch()
 
             if ch in (curses.KEY_UP, "k"):
@@ -900,6 +911,22 @@ class CursesApp:
                 if when not in (None, _CANCEL):
                     day = when
                     cursor = 0
+            elif ch == "<":
+                start_hour = max(0, start_hour - 1)
+                cursor = 0
+            elif ch == ">":
+                end_hour = min(24, end_hour + 1)
+                cursor = 0
+            elif ch == "R":
+                start_hour = self.config.workday_start
+                end_hour = self.config.workday_end
+                cursor = 0
+                self.message = "Window reset to default"
+            elif ch == "W":
+                self.config = Config(start_hour, end_hour)
+                save_config(self.doc.path, self.config)
+                self.message = (f"Saved default window: "
+                                f"{start_hour:02d}:00-{end_hour:02d}:00")
             elif ch == "u":
                 self.action_undo()
             elif ch in ("a", "\n", "\r", curses.KEY_ENTER):
@@ -914,19 +941,28 @@ class CursesApp:
         self.refresh_rows()
         self.message = "Left timeline"
 
-    def _draw_timeline(self, day, rows, ws, we, cursor) -> None:
+    def _draw_timeline(self, day, rows, ws, we, cursor,
+                       hidden_before: int = 0, hidden_after: int = 0) -> None:
         from .model import human_duration
         self.stdscr.erase()
         height, width = self.stdscr.getmaxyx()
         worked = sum((r.duration for r in rows if r.kind == ENTRY), timedelta())
         free = sum((r.duration for r in rows if r.kind == GAP), timedelta())
         header = (f" Timeline — {day:%a %Y-%m-%d}   "
-                  f"workday {ws:%H:%M}-{we:%H:%M} ")
+                  f"window {ws:%H:%M}-{we:%H:%M} ")
         summary = (f" worked {human_duration(worked)}   free {human_duration(free)}"
-                   f"   ({sum(1 for r in rows if r.kind == GAP)} gap(s)) ")
+                   f"   ({sum(1 for r in rows if r.kind == GAP)} gap(s))")
+        hints = []
+        if hidden_before:
+            hints.append(f"+{hidden_before} earlier (< to expand)")
+        if hidden_after:
+            hints.append(f"+{hidden_after} later (> to expand)")
+        if hints:
+            summary += "   " + ", ".join(hints)
         try:
             self.stdscr.addstr(0, 0, header[: width - 1], self.color(CP_BAR))
-            self.stdscr.addstr(1, 0, summary[: width - 1])
+            self.stdscr.addstr(1, 0, summary[: width - 1],
+                               self.color(CP_WARN, bold=True) if hints else 0)
         except curses.error:
             pass
 
@@ -955,8 +991,8 @@ class CursesApp:
             except curses.error:
                 pass
 
-        footer = ("a/Enter add in gap   [ ] prev/next day   g goto date   "
-                  "u undo   q back")
+        footer = ("a/Enter add   [ ] day   < > widen   R reset   W save default"
+                  "   g goto   u undo   q back")
         try:
             self.stdscr.addstr(height - 1, 0, footer[: width - 1], self.color(CP_BAR))
         except curses.error:

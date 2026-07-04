@@ -168,7 +168,7 @@ def test_timeline_rows_gaps_and_entries():
 """
     doc, _ = parse(text)
     now = datetime(2026, 6, 18, 12, 0)
-    rows, ws, we = timeline_rows(doc, date(2026, 6, 15), now=now)
+    rows, ws, we = timeline_rows(doc, date(2026, 6, 15), 9, 17, now=now)
     assert (ws.hour, we.hour) == (9, 17)
     # 9-10 gap, 10-11 entry, 11-13 gap, 13-14:30 entry, 14:30-17 gap
     kinds = [(r.kind, r.start.strftime("%H:%M"), r.end.strftime("%H:%M")) for r in rows]
@@ -191,10 +191,47 @@ def test_timeline_empty_day_is_one_gap():
     from orgtime.view import GAP, timeline_rows
 
     doc, _ = parse("* P\n** TODO T\n")
-    rows, ws, we = timeline_rows(doc, date(2026, 6, 15),
+    rows, ws, we = timeline_rows(doc, date(2026, 6, 15), 9, 17,
                                  now=datetime(2026, 6, 18, 12, 0))
     assert len(rows) == 1 and rows[0].kind == GAP
     assert rows[0].start == ws and rows[0].end == we
+
+
+def test_timeline_rows_default_window_is_7_to_18():
+    from datetime import date
+    from orgtime.view import timeline_rows
+
+    doc, _ = parse("* P\n** TODO T\n")
+    rows, ws, we = timeline_rows(doc, date(2026, 6, 15),
+                                 now=datetime(2026, 6, 18, 12, 0))
+    assert (ws.hour, we.hour) == (7, 18)
+
+
+def test_timeline_hidden_counts():
+    from datetime import date
+    from orgtime.view import timeline_hidden_counts
+
+    text = """\
+* P
+** TODO T
+   CLOCK: [2026-06-15 Mon 06:00]--[2026-06-15 Mon 06:30] => 0:30
+   CLOCK: [2026-06-15 Mon 10:00]--[2026-06-15 Mon 11:00] => 1:00
+   CLOCK: [2026-06-15 Mon 19:00]--[2026-06-15 Mon 20:00] => 1:00
+   CLOCK: [2026-06-16 Tue 09:00]--[2026-06-16 Tue 10:00] => 1:00
+"""
+    doc, _ = parse(text)
+    ws = datetime(2026, 6, 15, 7, 0)
+    we = datetime(2026, 6, 15, 18, 0)
+    before, after = timeline_hidden_counts(doc, date(2026, 6, 15), ws, we,
+                                           now=datetime(2026, 6, 18, 12, 0))
+    # 06:00-06:30 is before the window; 19:00-20:00 is after; the 10-11
+    # entry is inside the window (not hidden); the 6/16 entry is a different day
+    assert (before, after) == (1, 1)
+    # widening the window to include 6am leaves nothing hidden before
+    before2, _ = timeline_hidden_counts(
+        doc, date(2026, 6, 15), datetime(2026, 6, 15, 6, 0), we,
+        now=datetime(2026, 6, 18, 12, 0))
+    assert before2 == 0
 
 
 def test_next_match_index_wraps_and_loops():
@@ -225,6 +262,8 @@ if __name__ == "__main__":
                test_sorted_projects,
                test_timeline_rows_gaps_and_entries,
                test_timeline_empty_day_is_one_gap,
+               test_timeline_rows_default_window_is_7_to_18,
+               test_timeline_hidden_counts,
                test_next_match_index_wraps_and_loops]:
         fn()
         print(f"PASS {fn.__name__}")
