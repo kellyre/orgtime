@@ -128,10 +128,38 @@ class Row:
     text: str            # plain-text label (indentation already applied)
     warn: bool = False    # implausible clock entry?
     running: bool = False  # a running clock?
+    stale: str = "fresh"   # "fresh" | "stale" | "ancient", see `staleness()`
 
 
 def _indent(depth: int) -> str:
     return "  " * depth
+
+
+# staleness thresholds, in days since `modified` — see `staleness()`
+STALE_TASK_DAYS = 7
+STALE_PROJECT_DAYS = 14
+ANCIENT_DAYS = 90
+
+
+def staleness(modified: datetime | None, now: datetime, stale_days: int) -> str:
+    """"fresh", "stale", or "ancient" depending on how long ago ``modified``
+    was.  ``ancient`` (>= ANCIENT_DAYS) always wins over ``stale``."""
+    if modified is None:
+        return "fresh"
+    age = now - modified
+    if age >= timedelta(days=ANCIENT_DAYS):
+        return "ancient"
+    if age >= timedelta(days=stale_days):
+        return "stale"
+    return "fresh"
+
+
+def project_staleness(project: Project, now: datetime) -> str:
+    return staleness(project.modified, now, STALE_PROJECT_DAYS)
+
+
+def task_staleness(task: Task, now: datetime) -> str:
+    return staleness(task.modified, now, STALE_TASK_DAYS)
 
 
 SORT_MODES = ["file", "priority", "created", "modified"]
@@ -254,14 +282,16 @@ def flatten(doc: Document, now: datetime | None = None,
 
     for project in sorted_projects(doc, sort_mode):
         rows.append(Row(project, PROJECT, 0,
-                        project_text(project, now, sort_mode)))
+                        project_text(project, now, sort_mode),
+                        stale=project_staleness(project, now)))
         if project.collapsed:
             continue
         add_comments(project, 1)
         for task in project.tasks:
             warn = any(clock_warnings(c, now) for c in task.clocks)
             rows.append(Row(task, TASK, 1, task_text(task, now),
-                            running=task.running_clock() is not None, warn=warn))
+                            running=task.running_clock() is not None, warn=warn,
+                            stale=task_staleness(task, now)))
             if task.collapsed:
                 continue
             add_comments(task, 2)
@@ -289,7 +319,8 @@ HELP_LINES = [
     "  c                add/edit comment X              expunge ## lines",
     "  i / o            clock in / out   I / O          clock in/out at time",
     "  s / S            status fwd/back  D              mark task/project DONE",
-    "  1-5              set priority",
+    "  1-5              set priority     H              snap small overlaps",
+    "                                                    to the half-hour",
     "  u / U            undo / redo      v              verify (consistency)",
     "  r                write report     L              reload file",
     "  q                quit (saves)     ?              this help",

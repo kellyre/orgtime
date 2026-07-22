@@ -234,6 +234,54 @@ def test_timeline_hidden_counts():
     assert before2 == 0
 
 
+def test_staleness_thresholds():
+    from datetime import timedelta
+    from orgtime.view import staleness
+
+    now = datetime(2026, 6, 18, 12, 0)
+    assert staleness(None, now, 7) == "fresh"
+    assert staleness(now, now, 7) == "fresh"
+    assert staleness(now - timedelta(days=6), now, 7) == "fresh"
+    assert staleness(now - timedelta(days=7), now, 7) == "stale"
+    assert staleness(now - timedelta(days=13), now, 14) == "fresh"
+    assert staleness(now - timedelta(days=14), now, 14) == "stale"
+    assert staleness(now - timedelta(days=89), now, 7) == "stale"
+    assert staleness(now - timedelta(days=90), now, 7) == "ancient"
+    # ancient wins even for the looser (project) threshold
+    assert staleness(now - timedelta(days=90), now, 14) == "ancient"
+
+
+def test_task_and_project_staleness_and_flatten_rows():
+    from datetime import timedelta
+    from orgtime.model import Project, Task
+
+    now = datetime(2026, 6, 18, 12, 0)
+    from orgtime.view import project_staleness, task_staleness
+
+    fresh_task = Task(name="Fresh", modified=now - timedelta(days=1))
+    stale_task = Task(name="Stale", modified=now - timedelta(days=10))
+    ancient_task = Task(name="Ancient", modified=now - timedelta(days=100))
+    assert task_staleness(fresh_task, now) == "fresh"
+    assert task_staleness(stale_task, now) == "stale"
+    assert task_staleness(ancient_task, now) == "ancient"
+
+    fresh_proj = Project(name="P1", modified=now - timedelta(days=13))
+    stale_proj = Project(name="P2", modified=now - timedelta(days=14))
+    ancient_proj = Project(name="P3", modified=now - timedelta(days=91))
+    assert project_staleness(fresh_proj, now) == "fresh"
+    assert project_staleness(stale_proj, now) == "stale"
+    assert project_staleness(ancient_proj, now) == "ancient"
+
+    # flatten() attaches staleness to PROJECT/TASK rows
+    doc = Document(projects=[stale_proj])
+    stale_proj.tasks.append(stale_task)
+    stale_proj.collapsed = False
+    rows = flatten(doc, now=now)
+    prow = next(r for r in rows if r.kind == PROJECT)
+    trow = next(r for r in rows if r.kind == TASK)
+    assert prow.stale == "stale" and trow.stale == "stale"
+
+
 def test_next_match_index_wraps_and_loops():
     doc, _ = parse(SAMPLE)
     targets = search_targets(doc)
@@ -264,6 +312,8 @@ if __name__ == "__main__":
                test_timeline_empty_day_is_one_gap,
                test_timeline_rows_default_window_is_7_to_18,
                test_timeline_hidden_counts,
+               test_staleness_thresholds,
+               test_task_and_project_staleness_and_flatten_rows,
                test_next_match_index_wraps_and_loops]:
         fn()
         print(f"PASS {fn.__name__}")

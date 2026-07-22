@@ -31,10 +31,13 @@ from .model import (
     Task,
     apply_overlap_changes,
     apply_reshape,
+    apply_snap_fix,
     check_consistency,
     clock_warnings,
     comment_lines,
     describe_change,
+    describe_snap_fix,
+    find_snap_fixes,
     format_ts,
     load,
     make_backup,
@@ -73,6 +76,8 @@ CP_COMMENT = 3
 CP_WARN = 4
 CP_RUNNING = 5
 CP_BAR = 6
+CP_ANCIENT = 7
+CP_STALE = CP_COMMENT  # reuse the green pair, dimmed, for "not touched in a while"
 
 
 class CursesApp:
@@ -121,12 +126,18 @@ class CursesApp:
         curses.init_pair(CP_WARN, curses.COLOR_RED, -1)
         curses.init_pair(CP_RUNNING, curses.COLOR_YELLOW, -1)
         curses.init_pair(CP_BAR, curses.COLOR_WHITE, curses.COLOR_BLUE)
+        curses.init_pair(CP_ANCIENT, curses.COLOR_WHITE, -1)
 
-    def color(self, pair: int, bold: bool = False) -> int:
+    def color(self, pair: int, bold: bool = False, dim: bool = False) -> int:
         if not self.has_color:
-            return curses.A_BOLD if bold else curses.A_NORMAL
+            attr = curses.A_BOLD if bold else curses.A_NORMAL
+            return attr | curses.A_DIM if dim else attr
         attr = curses.color_pair(pair)
-        return attr | curses.A_BOLD if bold else attr
+        if bold:
+            attr |= curses.A_BOLD
+        if dim:
+            attr |= curses.A_DIM
+        return attr
 
     # -- model/view sync ---------------------------------------------------
 
@@ -204,10 +215,19 @@ class CursesApp:
         if row.warn:
             return self.color(CP_WARN, bold=True)
         if row.kind == PROJECT:
+            if row.stale == "ancient":
+                return self.color(CP_ANCIENT, bold=True, dim=True)
+            if row.stale == "stale":
+                return self.color(CP_STALE, bold=True, dim=True)
             return self.color(CP_PROJECT, bold=True)
         if row.kind == TASK:
-            return self.color(CP_RUNNING, bold=True) if row.running \
-                else self.color(CP_STATUS)
+            if row.running:
+                return self.color(CP_RUNNING, bold=True)
+            if row.stale == "ancient":
+                return self.color(CP_ANCIENT, dim=True)
+            if row.stale == "stale":
+                return self.color(CP_STALE, dim=True)
+            return self.color(CP_STATUS)
         if row.kind == COMMENT:
             return self.color(CP_COMMENT)
         return curses.A_NORMAL
@@ -306,6 +326,8 @@ class CursesApp:
             self.comment()
         elif ch == "X":
             self.expunge()
+        elif ch == "H":
+            self.snap_overlaps()
         elif ch == "i":
             self.clock_in()
         elif ch == "o":
@@ -821,8 +843,33 @@ class CursesApp:
 
     def check(self) -> None:
         problems = self.load_issues + check_consistency(self.doc)
+        fixes = find_snap_fixes(self.doc)
+        if fixes:
+            problems = problems + [
+                f"{len(fixes)} small overlap(s) could be snapped to a "
+                f"half-hour — press H to review"]
         self.show_report("Consistency check", problems or ["No problems found."],
                          plain=True)
+
+    def snap_overlaps(self) -> None:
+        fixes = find_snap_fixes(self.doc)
+        if not fixes:
+            self.message = "No small overlaps bordering a half-hour found"
+            return
+        lines = [f"{len(fixes)} small overlap(s) border or contain a "
+                 "half-hour mark:", ""]
+        lines += ["  " + describe_snap_fix(f) for f in fixes]
+        lines += ["", "Snap all of these to the half-hour?"]
+        if not self.confirm_list("Snap overlaps to half-hour", lines):
+            self.message = "Snap cancelled"
+            return
+        self.checkpoint()
+        for fix in fixes:
+            apply_snap_fix(fix)
+            self.doc.touch(fix.clock_a)
+            self.doc.touch(fix.clock_b)
+        self.save_and_refresh()
+        self.message = f"Snapped {len(fixes)} overlap(s) to the half-hour"
 
     def prompt_date(self, label: str):
         """Prompt for an optional date.  Returns a date, None (blank = open),
@@ -1087,7 +1134,9 @@ class CursesApp:
         ignore_subjects: set = set()
         imported = skipped = ignored = dup = 0
 
-        for event in plan.candidates:
+        # most-recent-first: if interrupted partway through, the events
+        # closest to today are the ones already handled
+        for event in reversed(plan.candidates):
             if event.subject in ignore_subjects:
                 ignored += 1
                 continue

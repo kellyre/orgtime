@@ -58,6 +58,7 @@ Press **`?`** inside the app for the full key list.
 | `L`       | Reload file from disk (after hand-editing)                    |
 | `v`       | Verify: consistency check (format + semantic problems)        |
 | `X`       | Expunge: permanently remove all soft-deleted (`##`) lines     |
+| `H`       | Find small overlaps bordering a half-hour and snap them to it |
 | `J`       | Jump to the running clock entry (expands its project and task) |
 | `C`       | Collapse all projects                                        |
 | `z`       | Cycle project sort: file → priority → created → modified (view only) |
@@ -98,6 +99,32 @@ precedence** (`Esc` cancels the whole edit):
 
 Either way, the popup flags any entry that would be **wiped out to `0:00`**,
 since that usually means a mistyped time.
+
+### Half-hour snap
+
+A very small overlap — under 10 minutes, bordering or straddling an exact
+half-hour (`:00` or `:30`) — is usually just clock-in/out imprecision, not a
+real double-booking. Press `H` at any time to scan the whole file for these
+and, after a single confirmation, snap **both** boundaries to that half-hour
+mark, closing the gap. `H` finds nothing if there's nothing to fix, and the
+consistency check (`v`) mentions the count if any exist. Overlaps of 10
+minutes or more, or ones that don't land on a half-hour, are left for the
+regular overlap-resolution popup above.
+
+## Staleness colouring
+
+Projects and tasks that haven't been touched in a while are dimmed so old
+work doesn't visually compete with what you're actively doing:
+
+- A **task** untouched for 7+ days is shown muted (dim green).
+- A **project** whose most recent task activity is 14+ days old is shown in
+  a darker shade of the same colour.
+- Either one untouched for 90+ days is shown as a shade of gray, regardless
+  of the shorter thresholds above.
+
+"Touched" is the same `modified` timestamp used for created/modified times
+and sorting (see below) — so clocking in, commenting, changing status, etc.
+all count and reset the staleness clock.
 
 ## File format
 
@@ -201,10 +228,14 @@ The importer reads the `Subject`, `Start/End Date/Time`, `All day event`, and
   (e.g. a meeting during an all-day "Out of Office" trip).
 - **All-day events are never imported** as clocks — they only serve as
   blackout windows.
-- Each remaining candidate (in chronological order) is offered with its
-  subject, time, and status, and you choose: **k** keep, **a** all (import
-  every entry with this subject to the same project/task), **s** skip, **i**
-  ignore all with this subject, or **q** quit.
+- Each remaining candidate is offered **most-recent-first** (newest date/time
+  down to oldest), with its subject, time, and status; you choose: **k** keep,
+  **a** all (import every entry with this subject to the same project/task),
+  **s** skip, **i** ignore all with this subject, or **q** quit. Processing
+  newest-first means that if you get interrupted partway through, the recent
+  entries — the ones you're most likely to need next — are already done.
+  `all`/`ignore all` apply to the remainder in this same newest-to-oldest
+  order.
 - **keep**/**all** then ask which project and task to import into (or make a
   new one, defaulting the task name to the subject).
 - An entry that exactly matches an existing clock is auto-skipped, so

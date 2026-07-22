@@ -682,6 +682,79 @@ def apply_reshape(doc: "Document", edited: "ClockEntry",
             task.clocks.insert(idx + offset, ClockEntry(start=start, end=end))
 
 
+# -- small-overlap half-hour snapping ----------------------------------------
+
+SNAP_MAX_OVERLAP = timedelta(minutes=10)
+_HALF_HOUR = timedelta(minutes=30)
+
+
+def half_hour_snap_point(start: datetime, end: datetime) -> datetime | None:
+    """If ``[start, end]`` borders on or contains an exact half-hour mark
+    (minute 0 or 30), return that mark; otherwise None.
+
+    Assumes ``end - start`` is well under 30 minutes, so at most one mark can
+    qualify.
+    """
+    if start > end:
+        start, end = end, start
+    lower = start.replace(minute=0 if start.minute < 30 else 30,
+                          second=0, microsecond=0)
+    upper = lower + _HALF_HOUR
+    for mark in (lower, upper):
+        if start <= mark <= end:
+            return mark
+    return None
+
+
+@dataclass
+class SnapFix:
+    """A pair of closed clock entries that overlap by less than
+    :data:`SNAP_MAX_OVERLAP` where the overlap borders on or contains an
+    exact half-hour mark — almost certainly a rounding slip rather than a
+    real double-booking."""
+
+    project_a: "Project"
+    task_a: "Task"
+    clock_a: "ClockEntry"     # the earlier-starting entry (its end moves)
+    project_b: "Project"
+    task_b: "Task"
+    clock_b: "ClockEntry"     # the later-starting entry (its start moves)
+    point: datetime
+
+
+def find_snap_fixes(doc: "Document") -> list[SnapFix]:
+    """Find every pair of closed clock entries anywhere in the document whose
+    small overlap (< 10 minutes) borders on or contains a half-hour mark."""
+    entries = [(p, t, c) for p in doc.projects for t in p.tasks
+              for c in t.clocks if c.end is not None]
+    fixes: list[SnapFix] = []
+    for i, (p1, t1, c1) in enumerate(entries):
+        for p2, t2, c2 in entries[i + 1:]:
+            a, b = ((p1, t1, c1), (p2, t2, c2)) if c1.start <= c2.start \
+                else ((p2, t2, c2), (p1, t1, c1))
+            if a[2].end <= b[2].start:
+                continue                       # no overlap
+            overlap = a[2].end - b[2].start
+            if overlap <= timedelta(0) or overlap >= SNAP_MAX_OVERLAP:
+                continue
+            point = half_hour_snap_point(b[2].start, a[2].end)
+            if point is not None:
+                fixes.append(SnapFix(*a, *b, point))
+    return fixes
+
+
+def describe_snap_fix(fix: SnapFix) -> str:
+    return (f"{fix.project_a.name} / {fix.task_a.name} end "
+            f"{_short_ts(fix.clock_a.end)}  &  "
+            f"{fix.project_b.name} / {fix.task_b.name} start "
+            f"{_short_ts(fix.clock_b.start)}  ->  both {_short_ts(fix.point)}")
+
+
+def apply_snap_fix(fix: SnapFix) -> None:
+    fix.clock_a.end = fix.point
+    fix.clock_b.start = fix.point
+
+
 # -- consistency check ------------------------------------------------------
 
 

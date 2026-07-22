@@ -28,6 +28,15 @@ SAMPLE_CSV = (
     'CTOP Dashboard,6/5/2026,2:00:00 PM,6/5/2026,3:00:00 PM,FALSE,"Kelly, Reed",2\n'
     'Maine,6/5/2026,12:00:00 AM,6/6/2026,12:00:00 AM,TRUE,"Kelly, Reed",4\n'
 )
+
+# two non-overlapping same-subject events on different dates, used to prove
+# the interactive import walks candidates newest-first
+REVERSE_ORDER_CSV = (
+    "Subject,Start Date,Start Time,End Date,End Time,Show time as\n"
+    "Foo,6/2/2026,9:00:00 AM,6/2/2026,10:00:00 AM,2\n"
+    "Foo,6/5/2026,9:00:00 AM,6/5/2026,10:00:00 AM,2\n"
+)
+
 from orgtime.view import PROJECT, CommentRef
 
 KEYS: deque = deque()
@@ -402,6 +411,125 @@ def _scenario_import(stdscr):
         assert "1 duplicate" in app.message
 
 
+def _scenario_import_reverse_order(stdscr):
+    """Interactive import walks candidates newest-first: keeping the FIRST
+    prompt and skipping the second should keep the 6/5 event (newer) and
+    skip the 6/2 event (older) — the opposite of forward chronological order."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "timelog.org"
+        csv_path = Path(tmp) / "reverse.csv"
+        csv_path.write_text(REVERSE_ORDER_CSV, encoding="utf-8")
+        app = CursesApp(stdscr, path)
+        curses.curs_set(0)
+        app._init_colors()
+        now = app._now()
+        proj = Project(name="Work", created=now, modified=now)
+        task = Task(name="Meetings", created=now, modified=now)
+        proj.tasks.append(task)
+        app.doc.projects.append(proj)
+        app.doc.save()
+        app.refresh_rows()
+
+        KEYS.extend(chars(str(csv_path)) + ["\n"])   # csv path
+        KEYS.extend(["\n"])                           # blackout code default
+        KEYS.extend(["\n", "\n"])                     # start/end blank -> all
+        KEYS.extend(["k"])                            # 1st prompt: keep
+        KEYS.extend([curses.KEY_DOWN, "\n"])          # project: Work
+        KEYS.extend([curses.KEY_DOWN, "\n"])          # task: Meetings
+        KEYS.extend(["s"])                            # 2nd prompt: skip
+        app.handle_key("A")
+
+        assert len(task.clocks) == 1, [c.start for c in task.clocks]
+        assert task.clocks[0].start == datetime(2026, 6, 5, 9, 0)  # newer kept
+        assert "1 added" in app.message and "1 skipped" in app.message
+
+
+def _scenario_snap(stdscr):
+    """H finds and fixes a small overlap bordering a half-hour mark."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "timelog.org"
+        app = CursesApp(stdscr, path)
+        curses.curs_set(0)
+        app._init_colors()
+        proj = Project(name="P")
+        task_a = Task(name="A")
+        task_b = Task(name="B")
+        task_a.clocks.append(ClockEntry(start=datetime(2026, 6, 10, 8, 0),
+                                        end=datetime(2026, 6, 10, 9, 7)))
+        task_b.clocks.append(ClockEntry(start=datetime(2026, 6, 10, 9, 0),
+                                        end=datetime(2026, 6, 10, 10, 0)))
+        proj.tasks.extend([task_a, task_b])
+        app.doc.projects.append(proj)
+        app.doc.save()
+        app.refresh_rows()
+
+        # consistency check mentions the fixable overlap
+        KEYS.append("q")
+        app.handle_key("v")
+
+        # H shows the proposed fix; decline first (nothing changes)
+        KEYS.append("n")
+        app.handle_key("H")
+        assert task_a.clocks[0].end == datetime(2026, 6, 10, 9, 7)
+
+        # H again, accept -> both boundaries snap to 09:00
+        KEYS.append("y")
+        app.handle_key("H")
+        assert task_a.clocks[0].end == datetime(2026, 6, 10, 9, 0)
+        assert task_b.clocks[0].start == datetime(2026, 6, 10, 9, 0)
+        assert "Snapped 1" in app.message
+
+        # nothing left to snap
+        app.handle_key("H")
+        assert "No small overlaps" in app.message
+
+
+def _scenario_staleness(stdscr):
+    """Row.stale is computed from `modified` and changes the drawn colour."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "timelog.org"
+        app = CursesApp(stdscr, path)
+        curses.curs_set(0)
+        app._init_colors()
+        now = app._now()
+        from datetime import timedelta
+
+        fresh_proj = Project(name="Fresh", modified=now)
+        fresh_task = Task(name="FreshTask", modified=now)
+        fresh_proj.tasks.append(fresh_task)
+
+        stale_proj = Project(name="Stale", modified=now - timedelta(days=20))
+        stale_task = Task(name="StaleTask", modified=now - timedelta(days=8))
+        stale_proj.tasks.append(stale_task)
+
+        ancient_proj = Project(name="Ancient", modified=now - timedelta(days=200))
+        ancient_task = Task(name="AncientTask", modified=now - timedelta(days=200))
+        ancient_proj.tasks.append(ancient_task)
+
+        app.doc.projects.extend([fresh_proj, stale_proj, ancient_proj])
+        for p in app.doc.projects:
+            p.collapsed = False
+        app.doc.save()
+        app.refresh_rows()
+        app.draw()  # exercise the real drawing/colour path, not just logic
+
+        def row_for(obj):
+            return next(r for r in app.rows if r.obj is obj)
+
+        assert row_for(fresh_proj).stale == "fresh"
+        assert row_for(stale_proj).stale == "stale"
+        assert row_for(ancient_proj).stale == "ancient"
+        assert row_for(fresh_task).stale == "fresh"
+        assert row_for(stale_task).stale == "stale"
+        assert row_for(ancient_task).stale == "ancient"
+
+        # each tier renders with a visibly different attribute
+        fresh_attr = app._row_attr(row_for(fresh_task))
+        stale_attr = app._row_attr(row_for(stale_task))
+        ancient_attr = app._row_attr(row_for(ancient_task))
+        assert len({fresh_attr, stale_attr, ancient_attr}) == 3
+
+
 def _scenario_timeline(stdscr):
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "timelog.org"
@@ -457,6 +585,12 @@ def main():
             _scenario(WinProxy(stdscr))
             KEYS.clear()
             _scenario_import(WinProxy(stdscr))
+            KEYS.clear()
+            _scenario_import_reverse_order(WinProxy(stdscr))
+            KEYS.clear()
+            _scenario_snap(WinProxy(stdscr))
+            KEYS.clear()
+            _scenario_staleness(WinProxy(stdscr))
             KEYS.clear()
             _scenario_timeline(WinProxy(stdscr))
         finally:
