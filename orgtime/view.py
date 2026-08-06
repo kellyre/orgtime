@@ -264,6 +264,16 @@ def next_match_index(targets: list[SearchTarget], term: str,
     return None
 
 
+def sorted_clocks(task: Task) -> list[ClockEntry]:
+    """A task's clock entries, most-recent-start first.
+
+    Display order only — the underlying ``task.clocks`` list (and thus the
+    saved file) stays in chronological order.  Ties keep their original
+    relative order (Python's sort is stable).
+    """
+    return sorted(task.clocks, key=lambda c: c.start, reverse=True)
+
+
 def flatten(doc: Document, now: datetime | None = None,
             sort_mode: str = "file") -> list[Row]:
     """Walk the document into visible rows, honouring collapse state.
@@ -271,6 +281,7 @@ def flatten(doc: Document, now: datetime | None = None,
     Project.collapsed hides everything beneath it; Task.collapsed hides the
     task's comments, clock entries, and clock-attached comments.
     ``sort_mode`` reorders projects for display only (see ``sorted_projects``).
+    Clock entries are shown most-recent-first (see ``sorted_clocks``).
     """
     now = now or datetime.now()
     rows: list[Row] = []
@@ -295,7 +306,7 @@ def flatten(doc: Document, now: datetime | None = None,
             if task.collapsed:
                 continue
             add_comments(task, 2)
-            for clock in task.clocks:
+            for clock in sorted_clocks(task):
                 rows.append(Row(clock, CLOCK, 2, clock_text(clock, now),
                                 warn=bool(clock_warnings(clock, now)),
                                 running=clock.running))

@@ -282,6 +282,38 @@ def test_task_and_project_staleness_and_flatten_rows():
     assert prow.stale == "stale" and trow.stale == "stale"
 
 
+CLOCKS_SAMPLE = """\
+* [#2] Website Redesign
+** IN-PROGRESS [#1] Design mockups
+   CLOCK: [2026-06-01 Mon 09:00]--[2026-06-01 Mon 10:00] => 1:00
+   CLOCK: [2026-06-03 Wed 09:00]--[2026-06-03 Wed 10:00] => 1:00
+# middle comment
+   CLOCK: [2026-06-02 Tue 09:00]--[2026-06-02 Tue 10:00] => 1:00
+"""
+
+
+def test_clocks_shown_most_recent_first():
+    doc, issues = parse(CLOCKS_SAMPLE)
+    assert issues == []
+    task = doc.projects[0].tasks[0]
+    task.collapsed = False
+    rows = flatten(doc, NOW)
+    clock_rows = [r for r in rows if r.kind == CLOCK]
+    # file order is 6/1, 6/3, 6/2 (a comment sits between the last two
+    # entries); display order must be most-recent-start-first regardless
+    starts = [r.obj.start for r in clock_rows]
+    assert starts == sorted(starts, reverse=True)
+    assert [s.day for s in starts] == [3, 2, 1]
+    # a comment attached to a clock still tracks the right clock after
+    # the reorder (identity, not position, decides ownership)
+    comment_row = next(r for r in rows if r.kind == COMMENT
+                       and isinstance(r.obj, CommentRef)
+                       and r.obj.owner in task.clocks)
+    assert comment_row.obj.owner.start.day == 3  # the clock right before it
+    # underlying storage stays in file (chronological) order, untouched
+    assert [c.start.day for c in task.clocks] == [1, 3, 2]
+
+
 def test_next_match_index_wraps_and_loops():
     doc, _ = parse(SAMPLE)
     targets = search_targets(doc)
@@ -314,6 +346,7 @@ if __name__ == "__main__":
                test_timeline_hidden_counts,
                test_staleness_thresholds,
                test_task_and_project_staleness_and_flatten_rows,
+               test_clocks_shown_most_recent_first,
                test_next_match_index_wraps_and_loops]:
         fn()
         print(f"PASS {fn.__name__}")

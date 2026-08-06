@@ -82,6 +82,11 @@ adjust afterward with `1`–`5` and `s`/`S`/`D`. Time fields accept
 the day the clock started). To fix an already-recorded interval, expand the
 task and press `e` on the CLOCK line.
 
+A task's CLOCK entries are displayed most-recent-first, so the entry you're
+most likely to want — today's — is always right under the task line. This
+is display order only; the file itself still stores entries chronologically,
+so hand-editing stays natural.
+
 ### Overlap resolution
 
 Because you can only do one thing at a time, two clock entries should never
