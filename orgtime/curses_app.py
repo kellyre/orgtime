@@ -61,6 +61,7 @@ from .view import (
     HELP_LINES,
     flatten,
     next_match_index,
+    priority_rows,
     search_targets,
     timeline_hidden_counts,
     timeline_rows,
@@ -93,6 +94,7 @@ class CursesApp:
         self._running = True
         self.search_term = ""
         self.sort_mode = "file"
+        self.mode = "normal"  # "normal" | "priority" (see priority_mode())
         self.config = load_config(path)
 
     # -- setup -------------------------------------------------------------
@@ -145,7 +147,10 @@ class CursesApp:
         """Rebuild the visible-row list, keeping the cursor on the same item."""
         prev = self.selected_obj()
         prev_owner = prev.owner if isinstance(prev, CommentRef) else None
-        self.rows = flatten(self.doc, sort_mode=self.sort_mode)
+        if self.mode == "priority":
+            self.rows = priority_rows(self.doc, self._now())
+        else:
+            self.rows = flatten(self.doc, sort_mode=self.sort_mode)
         if prev is not None:
             for i, row in enumerate(self.rows):
                 obj = row.obj
@@ -249,7 +254,13 @@ class CursesApp:
             pass
 
     def _draw_status(self, y: int, width: int) -> None:
-        msg = self.message or "?: help   q: quit   N/n: new   e: edit   d: del   i/o: clock"
+        if self.message:
+            msg = self.message
+        elif self.mode == "priority":
+            msg = ("PRIORITY VIEW  i: clock in & return   s/S: status   "
+                  "1-5: priority   D: done   q: back")
+        else:
+            msg = "?: help   q: quit   N/n: new   e: edit   d: del   i/o: clock"
         try:
             self.stdscr.addstr(y, 0, msg[: width - 1])
         except curses.error:
@@ -308,6 +319,8 @@ class CursesApp:
             self.import_calendar()
         elif ch == "t":
             self.timeline_mode()
+        elif ch == "p":
+            self.priority_mode()
         elif ch == "/":
             self.search()
         elif ch == "m":
@@ -989,6 +1002,79 @@ class CursesApp:
                 pass
         self.refresh_rows()
         self.message = "Left timeline"
+
+    def priority_mode(self) -> None:
+        """Flat, cross-project triage view: every open task, sorted by task
+        priority then project priority then most-recently-touched first (see
+        ``priority_rows``).
+
+        Navigation and status(s/S)/done(D)/priority(1-5) work directly here
+        and re-sort or drop the row immediately, same as in the normal view.
+        'i' clocks the selected task in and drops straight back to the
+        normal view, cursor on the new clock entry -- exactly as if you'd
+        pressed 'i' there yourself. 'q'/Esc returns without clocking in.
+        """
+        self.mode = "priority"
+        self.refresh_rows()
+        self.cursor = 0  # always land on the most urgent task
+        if not self.rows:
+            self.message = "No open tasks to prioritize"
+            self.mode = "normal"
+            self.refresh_rows()
+            return
+        while True:
+            self.draw()
+            ch = self.stdscr.get_wch()
+            self.message = ""
+            if ch in (curses.KEY_UP, "k"):
+                self.move(-1)
+            elif ch in (curses.KEY_DOWN, "j"):
+                self.move(1)
+            elif ch == curses.KEY_NPAGE:
+                self.move(10)
+            elif ch == curses.KEY_PPAGE:
+                self.move(-10)
+            elif ch in (curses.KEY_HOME, "g"):
+                self.cursor = 0
+            elif ch in (curses.KEY_END, "G"):
+                self.cursor = len(self.rows) - 1
+            elif ch == "s":
+                self.cycle_status(1)
+            elif ch == "S":
+                self.cycle_status(-1)
+            elif ch == "D":
+                self.mark_done()
+            elif isinstance(ch, str) and ch in "12345":
+                self.set_priority(int(ch))
+            elif ch == "i":
+                # capture task/project while self.rows still holds this
+                # flat priority list -- switching self.mode below rebuilds
+                # self.rows via the normal tree, which would no longer
+                # resolve the current cursor position the same way
+                task = self.selected_task()
+                project = self.doc.project_of(task) if task is not None else None
+                self.mode = "normal"
+                if project is not None:
+                    # the task's project may be collapsed (unlike normal
+                    # mode, this flat view lets you land on it anyway) --
+                    # expand it BEFORE rebuilding rows, so the task (and,
+                    # after clock_in(), its new clock entry) is present to
+                    # select in the normal-mode row list below
+                    project.collapsed = False
+                self.refresh_rows()
+                if task is not None:
+                    self._select_obj(task)
+                    self.clock_in()
+                return
+            elif ch in ("q", "Q", "\x1b"):
+                break
+            elif ch == curses.KEY_RESIZE:
+                pass
+            if not self.rows:
+                self.message = "No open tasks remain"
+                break
+        self.mode = "normal"
+        self.refresh_rows()
 
     def _draw_timeline(self, day, rows, ws, we, cursor,
                        hidden_before: int = 0, hidden_after: int = 0) -> None:

@@ -1,6 +1,6 @@
 """Tests for the curses-free view layer (flatten / labels / collapse)."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from orgtime.model import Document, parse
 from orgtime.view import (
@@ -314,6 +314,47 @@ def test_clocks_shown_most_recent_first():
     assert [c.start.day for c in task.clocks] == [1, 3, 2]
 
 
+def test_priority_rows_sort_and_filter():
+    from orgtime.model import Project, Task
+    from orgtime.view import priority_rows
+
+    doc = Document()
+    now = datetime(2026, 6, 20, 12, 0)
+
+    p1 = Project(name="Alpha", priority=2)
+    p2 = Project(name="Beta", priority=1)
+    doc.projects.extend([p1, p2])
+
+    # same task priority (1), different project priority -> p2's task first
+    t_alpha_hi = Task(name="A-hi", priority=1, modified=now)
+    p1.tasks.append(t_alpha_hi)
+    t_beta_hi = Task(name="B-hi", priority=1, modified=now)
+    p2.tasks.append(t_beta_hi)
+
+    # same task+project priority (3, p1) -> more recently modified first
+    t_old = Task(name="Old", priority=3, modified=now - timedelta(days=5))
+    p1.tasks.append(t_old)
+    t_new = Task(name="New", priority=3, modified=now - timedelta(hours=1))
+    p1.tasks.append(t_new)
+
+    # closed tasks never appear
+    t_done = Task(name="Done", priority=1, status="DONE", modified=now)
+    p1.tasks.append(t_done)
+    t_cancelled = Task(name="Cancelled", priority=1, status="CANCELLED",
+                       modified=now)
+    p2.tasks.append(t_cancelled)
+
+    rows = priority_rows(doc, now)
+    names = [r.obj.name for r in rows]
+    assert names == ["B-hi", "A-hi", "New", "Old"]
+    assert all(r.kind == TASK and r.depth == 0 for r in rows)
+
+    # label carries task priority/status/name then project priority/name
+    b_hi_row = next(r for r in rows if r.obj is t_beta_hi)
+    assert b_hi_row.text.startswith("#1 TODO B-hi")
+    assert "(#1 Beta)" in b_hi_row.text
+
+
 def test_next_match_index_wraps_and_loops():
     doc, _ = parse(SAMPLE)
     targets = search_targets(doc)
@@ -347,6 +388,7 @@ if __name__ == "__main__":
                test_staleness_thresholds,
                test_task_and_project_staleness_and_flatten_rows,
                test_clocks_shown_most_recent_first,
+               test_priority_rows_sort_and_filter,
                test_next_match_index_wraps_and_loops]:
         fn()
         print(f"PASS {fn.__name__}")

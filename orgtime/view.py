@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
 from .model import (
+    CLOSED_STATUSES,
     ClockEntry,
     Document,
     Project,
@@ -314,6 +315,46 @@ def flatten(doc: Document, now: datetime | None = None,
     return rows
 
 
+def priority_task_text(task: Task, project: Project, now: datetime) -> str:
+    total = task.total_time(now)
+    time_part = f"  {human_duration(total)}" if total else ""
+    run = "  *RUNNING*" if task.running_clock() else ""
+    return (f"#{task.priority} {task.status} {task.name}  "
+            f"(#{project.priority} {project.name}){time_part}{run}")
+
+
+def priority_rows(doc: Document, now: datetime | None = None) -> list[Row]:
+    """Flat, cross-project triage list: every open (non-closed) task, most
+    urgent first.
+
+    Sort order: task priority (1 highest) ascending, then project priority
+    ascending, then — for ties on both — most-recently-touched task first
+    (``task.modified``, which every clock in/out/edit already bumps
+    alongside comments/status/rename/priority changes, so it already
+    reflects "modified or clocked, whichever is more recent").
+    """
+    now = now or datetime.now()
+
+    def sort_key(item):
+        task, project = item
+        ts = task.modified or datetime.min
+        # ascending "age" (now - ts) sorts the most recently touched first;
+        # avoids datetime.timestamp(), which errors on very old/naive dates
+        # on some platforms (e.g. Windows can't represent datetime.min)
+        return (task.priority, project.priority, now - ts)
+
+    pairs = [(task, project) for project in doc.projects for task in project.tasks
+             if task.status not in CLOSED_STATUSES]
+    pairs.sort(key=sort_key)
+    rows = []
+    for task, project in pairs:
+        warn = any(clock_warnings(c, now) for c in task.clocks)
+        rows.append(Row(task, TASK, 0, priority_task_text(task, project, now),
+                        running=task.running_clock() is not None, warn=warn,
+                        stale=task_staleness(task, now)))
+    return rows
+
+
 HELP_LINES = [
     "orgtime (curses)  —  keys",
     "",
@@ -324,6 +365,9 @@ HELP_LINES = [
     "  A                import Outlook calendar CSV (appointments)",
     "  t                timeline for a day: show gaps, add entries in a gap",
     "     in timeline:  < > widen window   R reset   W save as default",
+    "  p                priority view: open tasks across all projects,",
+    "                   sorted by priority; s/S/D/1-5 work there too;",
+    "                   i clocks in and returns here",
     "  /                search (repeat with /)  m       move task to project",
     "  N                new project      n              new task",
     "  e                edit item        d              delete (soft)",

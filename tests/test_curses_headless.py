@@ -484,6 +484,71 @@ def _scenario_snap(stdscr):
         assert "No small overlaps" in app.message
 
 
+def _scenario_priority_mode(stdscr):
+    """p opens the cross-project priority triage view.
+
+    priority_mode() is its own blocking loop (like timeline_mode()): a
+    single handle_key("p") call doesn't return until 'i' or 'q' ends the
+    session, so each interactive step below queues its whole key sequence
+    up front. Ordering is checked between sessions via priority_rows()
+    directly, decoupled from the interactive loop.
+    """
+    from orgtime.view import priority_rows
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "timelog.org"
+        app = CursesApp(stdscr, path)
+        curses.curs_set(0)
+        app._init_colors()
+
+        p1 = Project(name="P1", priority=1, collapsed=False)
+        p2 = Project(name="P2", priority=2, collapsed=True)  # stays collapsed
+        task_a = Task(name="A", priority=1)
+        task_b = Task(name="B", priority=2)
+        p1.tasks.extend([task_a, task_b])
+        task_c = Task(name="C", priority=1)
+        p2.tasks.append(task_c)
+        app.doc.projects.extend([p1, p2])
+        app.doc.save()
+        app.refresh_rows()
+
+        def names():
+            return [r.obj.name for r in priority_rows(app.doc, app._now())]
+
+        # task priority ascending, ties broken by project priority:
+        # A (t1/p1), C (t1/p2), B (t2/p1)
+        assert names() == ["A", "C", "B"]
+
+        # move onto C, then i: clocks in, auto-expands its (collapsed)
+        # project, and returns to normal mode with the cursor on the new
+        # clock entry -- exactly as if 'i' had been pressed on C there
+        KEYS.extend(["j", "i"])
+        app.handle_key("p")
+        assert app.mode == "normal"
+        assert p2.collapsed is False
+        assert task_c.clocks and task_c.clocks[-1].running
+        assert app.selected_obj() is task_c.clocks[-1]
+        assert task_c.status == "IN-PROGRESS"
+        assert names() == ["A", "C", "B"]  # C still open, same order
+
+        # re-enter: change A's (selected on entry) priority to 5 (lowest);
+        # the list re-sorts immediately and the cursor follows A, then D
+        # marks it done and it drops out of the view, then q leaves
+        KEYS.extend(["5", "D", "q"])
+        app.handle_key("p")
+        assert app.mode == "normal"
+        assert task_a.status == "DONE"
+        assert names() == ["C", "B"]
+
+        # once nothing is open, entering the view is a no-op with a message
+        for project in app.doc.projects:
+            for task in project.tasks:
+                task.status = "DONE"
+        app.handle_key("p")
+        assert app.mode == "normal"
+        assert "No open tasks" in app.message
+
+
 def _scenario_staleness(stdscr):
     """Row.stale is computed from `modified` and changes the drawn colour."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -619,6 +684,8 @@ def main():
             _scenario_snap(WinProxy(stdscr))
             KEYS.clear()
             _scenario_clock_in_focus(WinProxy(stdscr))
+            KEYS.clear()
+            _scenario_priority_mode(WinProxy(stdscr))
             KEYS.clear()
             _scenario_staleness(WinProxy(stdscr))
             KEYS.clear()

@@ -64,6 +64,7 @@ Press **`?`** inside the app for the full key list.
 | `z`       | Cycle project sort: file → priority → created → modified (view only) |
 | `A`       | Import an Outlook calendar CSV export as clock entries         |
 | `t`       | Timeline mode: one day's workday window with gaps, to fill gaps (in timeline: `<`/`>` widen, `R` reset, `W` save as default) |
+| `p`       | Priority mode: flat, cross-project list of open tasks, most urgent first (in priority mode: `s`/`S`/`D`/`1`-`5` also work; `i` clocks in and returns here to normal mode) |
 | `space` / `enter` / `tab` | Collapse / expand the selected project or task |
 | `/`       | Search project/task names and comments; press `/` again to jump to the next match (loops); Esc cancels, leaving you on the current match |
 | `?`       | Show the in-app key list                                     |
@@ -115,6 +116,28 @@ mark, closing the gap. `H` finds nothing if there's nothing to fix, and the
 consistency check (`v`) mentions the count if any exist. Overlaps of 10
 minutes or more, or ones that don't land on a half-hour, are left for the
 regular overlap-resolution popup above.
+
+### Priority mode
+
+Press `p` for a flat, cross-project triage list — every open task (TODO /
+IN-PROGRESS / HOLD; DONE and CANCELLED are left out), sorted so the most
+urgent is always at the top:
+
+1. Task priority, `#1` first.
+2. Project priority, `#1` first (breaks ties on task priority).
+3. Most recently touched first (breaks ties on both) — the same `modified`
+   timestamp used for staleness colouring and created/modified times, which
+   every clock in/out/edit already bumps alongside comments, status, rename,
+   and priority changes, so this one field already reflects "modified or
+   clocked, whichever is more recent."
+
+Each line shows the task first, then its project in parentheses:
+`#1 IN-PROGRESS Fix login bug  (#2 Website Redesign)`. Status (`s`/`S`/`D`)
+and priority (`1`-`5`) work directly in this view — the list re-sorts (or the
+row drops out, for `D`) immediately. Press `i` to clock in on the selected
+task; this returns you to the normal view with the cursor on the new clock
+entry, exactly as if you'd pressed `i` there — the same behaviour described
+above. `q`/Esc leaves without clocking in.
 
 ## Staleness colouring
 
