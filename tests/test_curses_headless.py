@@ -577,6 +577,34 @@ def _scenario_timeline(stdscr):
         assert on_disk.workday_start == 6 and on_disk.workday_end == 19
 
 
+def _scenario_clock_in_focus(stdscr):
+    """i (and I) move the cursor onto the freshly created clock entry."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "timelog.org"
+        app = CursesApp(stdscr, path)
+        curses.curs_set(0)
+        app._init_colors()
+        proj = Project(name="P")
+        task = Task(name="A")
+        proj.tasks.append(task)
+        app.doc.projects.append(proj)
+        app.doc.save()
+        app.refresh_rows()
+
+        select(app, task)
+        app.handle_key("i")
+        assert task.clocks and task.clocks[-1].running
+        assert app.selected_obj() is task.clocks[-1]
+
+        app.handle_key("o")  # clock back out so I can clock in again below
+
+        select(app, task)
+        KEYS.extend(["\x15"] + chars("08:00") + ["\n"])
+        app.handle_key("I")
+        assert task.clocks[-1].start.strftime("%H:%M") == "08:00"
+        assert app.selected_obj() is task.clocks[-1]
+
+
 def main():
     def run_all(stdscr):
         real_newwin = curses.newwin
@@ -589,6 +617,8 @@ def main():
             _scenario_import_reverse_order(WinProxy(stdscr))
             KEYS.clear()
             _scenario_snap(WinProxy(stdscr))
+            KEYS.clear()
+            _scenario_clock_in_focus(WinProxy(stdscr))
             KEYS.clear()
             _scenario_staleness(WinProxy(stdscr))
             KEYS.clear()

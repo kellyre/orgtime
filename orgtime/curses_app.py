@@ -734,6 +734,7 @@ class CursesApp:
         self.doc.touch(task)
         task.collapsed = False
         self.save_and_refresh()
+        self._select_obj(task.clocks[-1])
         self.message = f"Clocked in: {task.name}"
 
     def clock_out(self) -> None:
@@ -762,6 +763,7 @@ class CursesApp:
         self.doc.touch(task)
         task.collapsed = False
         self.save_and_refresh()
+        self._select_obj(task.clocks[-1])
         self.message = f"Clocked in: {task.name} at {when:%H:%M}"
         self.warn_about(task.clocks[-1])
 
