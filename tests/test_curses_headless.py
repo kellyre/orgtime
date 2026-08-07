@@ -287,13 +287,17 @@ def _scenario(stdscr):
         KEYS.append("y")  # confirm
         app.handle_key("d")
         assert task.comments == []
-        assert task.tombstones == ["### first", "### second"]
+        # tombstoned comments are prefixed with a :DELETED: marker (used by
+        # find_deleted_items/report inclusion) ahead of the ### lines
+        assert task.tombstones[0].startswith("## :DELETED: [")
+        assert task.tombstones[1:] == ["### first", "### second"]
 
         # -- soft delete the whole task ----------------------------------
         select(app, task)
         KEYS.append("y")
         app.handle_key("d")
         assert project.tasks == []
+        assert project.tombstones[0].startswith("## :DELETED: [")
         assert any(s.startswith("## ** ") for s in project.tombstones)
         assert app.doc.tombstone_count() > 0
 
@@ -549,6 +553,69 @@ def _scenario_priority_mode(stdscr):
         assert "No open tasks" in app.message
 
 
+def _scenario_restore(stdscr):
+    """R lists deletions (most recent first) and restores the chosen one.
+
+    The two deletions below are set up directly (rather than via the 'd'
+    key) with explicit, distinct :DELETED: timestamps -- 'd' stamps with
+    real, minute-truncated wall-clock time, so two quick presses in a fast
+    test could tie and make the intended ordering flaky. The interactive
+    'R' flow itself (list, cancel, restore) is what's under test here.
+    """
+    from orgtime.model import soft_delete_lines
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "timelog.org"
+        app = CursesApp(stdscr, path)
+        curses.curs_set(0)
+        app._init_colors()
+
+        proj = Project(name="P", collapsed=False)
+        task_a = Task(name="A")
+        task_a.clocks.append(ClockEntry(start=datetime(2026, 6, 1, 9, 0),
+                                        end=datetime(2026, 6, 1, 10, 0)))
+        task_b = Task(name="B", collapsed=False)
+        dead_clock = ClockEntry(start=datetime(2026, 6, 2, 9, 0),
+                                end=datetime(2026, 6, 2, 10, 0))
+        proj.tasks.extend([task_a, task_b])
+        app.doc.projects.append(proj)
+
+        # task A deleted first (older), then B's clock (more recent)
+        proj.tombstones.extend(
+            soft_delete_lines(task_a.lines(), datetime(2026, 6, 3, 8, 0)))
+        proj.tasks.remove(task_a)
+        task_b.tombstones.extend(
+            soft_delete_lines(dead_clock.lines(), datetime(2026, 6, 3, 9, 0)))
+        app.doc.save()
+        app.refresh_rows()
+
+        # R lists both, most-recently-deleted first: the clock before the task
+        KEYS.append("\x1b")  # Esc: back out first, to prove cancel is a no-op
+        app.handle_key("R")
+        assert app.message == "Restore cancelled"
+        assert task_b.clocks == [] and not any(t.name == "A" for t in proj.tasks)
+
+        # restore the clock (top of the list): index 0, Enter
+        KEYS.append("\n")
+        app.handle_key("R")
+        assert len(task_b.clocks) == 1
+        assert task_b.clocks[0].start == datetime(2026, 6, 2, 9, 0)
+        assert app.selected_obj() is task_b.clocks[0]
+
+        # restore the task: now the only entry left, index 0, Enter
+        KEYS.append("\n")
+        app.handle_key("R")
+        assert any(t.name == "A" for t in proj.tasks)
+        restored_task = next(t for t in proj.tasks if t.name == "A")
+        assert len(restored_task.clocks) == 1
+        assert app.selected_obj() is restored_task
+        assert proj.tombstones == [] and task_b.tombstones == []
+
+        # nothing left to restore
+        app.handle_key("R")
+        assert "No deleted items" in app.message
+
+
 def _scenario_staleness(stdscr):
     """Row.stale is computed from `modified` and changes the drawn colour."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -686,6 +753,8 @@ def main():
             _scenario_clock_in_focus(WinProxy(stdscr))
             KEYS.clear()
             _scenario_priority_mode(WinProxy(stdscr))
+            KEYS.clear()
+            _scenario_restore(WinProxy(stdscr))
             KEYS.clear()
             _scenario_staleness(WinProxy(stdscr))
             KEYS.clear()

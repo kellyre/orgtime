@@ -19,6 +19,7 @@ from .model import (
     Task,
     clock_warnings,
     format_duration,
+    format_ts,
     human_duration,
 )
 
@@ -355,6 +356,27 @@ def priority_rows(doc: Document, now: datetime | None = None) -> list[Row]:
     return rows
 
 
+def describe_deleted_item(item) -> str:
+    """One line for the restore chooser: kind, name, where it was, and when
+    it was deleted (or "time unknown" for pre-marker legacy deletions)."""
+    when = f"deleted {format_ts(item.deleted_at)}" if item.deleted_at \
+        else "deleted, time unknown"
+    if item.kind == "project":
+        n = len(item.obj.tasks)
+        return (f"PROJECT  {item.obj.name}  "
+                f"({n} task{'s' if n != 1 else ''})  [{when}]")
+    if item.kind == "task":
+        owner_name = item.owner.name if item.owner else "?"
+        return (f"TASK     {item.obj.name}  (was in: {owner_name})  [{when}]")
+    if item.kind == "clock":
+        owner_name = item.owner.name if item.owner else "?"
+        end = format_ts(item.obj.end) if item.obj.end else "..."
+        dur = format_duration(item.obj.duration())
+        return (f"CLOCK    {format_ts(item.obj.start)}--{end} => {dur}  "
+                f"(was in: {owner_name})  [{when}]")
+    return f"? {item.obj!r}"
+
+
 HELP_LINES = [
     "orgtime (curses)  —  keys",
     "",
@@ -378,9 +400,12 @@ HELP_LINES = [
     "                                                    to the half-hour",
     "  u / U            undo / redo      v              verify (consistency)",
     "  r                write report     L              reload file",
+    "  R                restore a deleted project/task/clock (most recent",
+    "                   deletion first)",
     "  q                quit (saves)     ?              this help",
     "",
     "  Comments are edited in a multi-line box: Ctrl+O saves, Esc cancels.",
     "  Deletes are soft: lines get ## prepended and stay in the file.",
+    "  Report time totals include deleted items, labeled \"(deleted)\".",
     "  Press any key to close this help.",
 ]

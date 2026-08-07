@@ -37,6 +37,7 @@ from .model import (
     comment_lines,
     describe_change,
     describe_snap_fix,
+    find_deleted_items,
     find_snap_fixes,
     format_ts,
     load,
@@ -45,7 +46,7 @@ from .model import (
     parse_user_date,
     parse_user_ts,
     reshape_to_avoid,
-    tombstoned,
+    soft_delete_lines,
 )
 from .calimport import parse_csv, plan_import
 from .config import Config, load_config, save_config
@@ -59,6 +60,7 @@ from .view import (
     TASK,
     CommentRef,
     HELP_LINES,
+    describe_deleted_item,
     flatten,
     next_match_index,
     priority_rows,
@@ -339,6 +341,8 @@ class CursesApp:
             self.comment()
         elif ch == "X":
             self.expunge()
+        elif ch == "R":
+            self.restore_deleted()
         elif ch == "H":
             self.snap_overlaps()
         elif ch == "i":
@@ -670,26 +674,28 @@ class CursesApp:
         if not self.confirm(msg):
             return
         self.checkpoint()
+        now = self._now()
         if isinstance(obj, Project):
-            self.doc.tombstones.extend(tombstoned(obj.lines()))
+            self.doc.tombstones.extend(soft_delete_lines(obj.lines(), now))
             self.doc.projects.remove(obj)
         elif isinstance(obj, Task):
             project = self.doc.project_of(obj)
-            project.tombstones.extend(tombstoned(obj.lines()))
+            project.tombstones.extend(soft_delete_lines(obj.lines(), now))
             project.tasks.remove(obj)
             self.doc.touch(project)
         elif isinstance(obj, CommentRef):
             owner = obj.owner
-            owner.tombstones.extend(tombstoned(comment_lines(owner.comments)))
+            owner.tombstones.extend(
+                soft_delete_lines(comment_lines(owner.comments), now))
             owner.comments.clear()
             self.doc.touch(owner)
         else:
             task = self.doc.task_of(obj)
-            task.tombstones.extend(tombstoned(obj.lines()))
+            task.tombstones.extend(soft_delete_lines(obj.lines(), now))
             task.clocks.remove(obj)
             self.doc.touch(task)
         self.save_and_refresh()
-        self.message = "Deleted (kept as ## lines — press X to expunge)"
+        self.message = "Deleted (kept as ## lines — press X to expunge, R to restore)"
 
     def expunge(self) -> None:
         count = self.doc.tombstone_count()
@@ -702,6 +708,35 @@ class CursesApp:
         removed = self.doc.expunge()
         self.save_and_refresh()
         self.message = f"Expunged {removed} deleted line(s)"
+
+    def restore_deleted(self) -> None:
+        items = find_deleted_items(self.doc, self._now())
+        if not items:
+            self.message = "No deleted items to restore"
+            return
+        options = [describe_deleted_item(it) for it in items]
+        idx = self.prompt_list_choice("Restore (most recent deletion first)",
+                                      options, 0)
+        if idx is None:
+            self.message = "Restore cancelled"
+            return
+        item = items[idx]
+        self.checkpoint()
+        self.doc.restore(item)
+        self.doc.touch(item.obj)
+        # expand whatever ancestors might be collapsed so the restored item
+        # (and, for a task, its own clocks) is actually visible afterward
+        if item.kind == "task":
+            item.obj.collapsed = False
+            item.owner.collapsed = False
+        elif item.kind == "clock":
+            item.owner.collapsed = False
+            project = self.doc.project_of(item.owner)
+            if project is not None:
+                project.collapsed = False
+        self.save_and_refresh()
+        self._select_obj(item.obj)
+        self.message = f"Restored: {describe_deleted_item(item)}"
 
     # -- actions: comments -------------------------------------------------
 

@@ -1,10 +1,16 @@
 from datetime import datetime, timedelta
 
 from orgtime.model import (
+    ClockEntry,
+    Document,
+    Project,
+    Task,
     check_consistency,
     comment_lines,
+    find_deleted_items,
     format_duration,
     parse,
+    soft_delete_lines,
     tombstoned,
 )
 
@@ -160,6 +166,120 @@ def test_tombstoned_helper():
     assert comment_lines(["hello", ""]) == ["# hello", "#"]
 
 
+def test_soft_delete_lines_adds_deleted_marker():
+    lines = soft_delete_lines(["* Proj", "   CLOCK: x"], datetime(2026, 6, 1, 9, 0))
+    assert lines[0] == "## :DELETED: [2026-06-01 Mon 09:00]"
+    assert lines[1:] == ["## * Proj", "##    CLOCK: x"]
+
+
+def test_find_deleted_items_clock_task_project_and_restore():
+    doc = Document()
+
+    proj = Project(name="Live Project")
+    task = Task(name="Live Task")
+    task.clocks.append(ClockEntry(start=datetime(2026, 6, 10, 9, 0),
+                                  end=datetime(2026, 6, 10, 10, 0)))
+    proj.tasks.append(task)
+    doc.projects.append(proj)
+
+    # delete a clock (still under the live task)
+    dead_clock = ClockEntry(start=datetime(2026, 6, 10, 11, 0),
+                            end=datetime(2026, 6, 10, 12, 0))
+    task.tombstones.extend(soft_delete_lines(dead_clock.lines(),
+                                             datetime(2026, 6, 11, 8, 0)))
+
+    # delete a task (still under the live project)
+    dead_task = Task(name="Deleted Task")
+    dead_task.clocks.append(ClockEntry(start=datetime(2026, 6, 10, 13, 0),
+                                       end=datetime(2026, 6, 10, 14, 0)))
+    proj.tombstones.extend(soft_delete_lines(dead_task.lines(),
+                                             datetime(2026, 6, 11, 9, 0)))
+
+    # delete a whole project
+    dead_proj = Project(name="Deleted Project")
+    dead_proj.tasks.append(Task(name="Orphaned Task"))
+    doc.projects.append(dead_proj)
+    doc.tombstones.extend(soft_delete_lines(dead_proj.lines(),
+                                            datetime(2026, 6, 11, 10, 0)))
+    doc.projects.remove(dead_proj)
+
+    now = datetime(2026, 6, 12)
+    items = find_deleted_items(doc, now)
+    assert [it.kind for it in items] == ["project", "task", "clock"]  # most-recent-first
+    assert [it.deleted_at for it in items] == [
+        datetime(2026, 6, 11, 10, 0), datetime(2026, 6, 11, 9, 0),
+        datetime(2026, 6, 11, 8, 0),
+    ]
+
+    proj_item, task_item, clock_item = items
+    assert proj_item.obj.name == "Deleted Project"
+    assert proj_item.obj.tasks[0].name == "Orphaned Task"
+    assert task_item.obj.name == "Deleted Task" and task_item.owner is proj
+    assert clock_item.obj.start == dead_clock.start and clock_item.owner is task
+
+    # restore the clock: reappears on the live task, tombstone lines gone
+    doc.restore(clock_item)
+    assert dead_clock.start in [c.start for c in task.clocks]
+    assert task.tombstones == []
+
+    # restore the task: reappears on the live project
+    doc.restore(task_item)
+    assert "Deleted Task" in [t.name for t in proj.tasks]
+    assert proj.tombstones == []
+
+    # restore the project: reappears in the document, with its own task
+    doc.restore(proj_item)
+    restored = next(p for p in doc.projects if p.name == "Deleted Project")
+    assert [t.name for t in restored.tasks] == ["Orphaned Task"]
+    assert doc.tombstones == []
+
+
+def test_find_deleted_items_survives_file_roundtrip():
+    import tempfile
+    from pathlib import Path
+
+    doc = Document()
+    proj = Project(name="Website")
+    task = Task(name="Design")
+    task.clocks.append(ClockEntry(start=datetime(2026, 6, 9, 9, 0),
+                                  end=datetime(2026, 6, 9, 10, 30)))
+    proj.tasks.append(task)
+    doc.projects.append(proj)
+
+    dead_task = Task(name="Deleted Task")
+    dead_task.clocks.append(ClockEntry(start=datetime(2026, 6, 5, 9, 0),
+                                       end=datetime(2026, 6, 5, 10, 0)))
+    proj.tombstones.extend(soft_delete_lines(dead_task.lines(),
+                                             datetime(2026, 6, 10, 8, 0)))
+
+    with tempfile.TemporaryDirectory() as tmp:
+        doc.path = Path(tmp) / "timelog.org"
+        doc.save()
+        doc2, issues = parse(doc.path.read_text())
+
+    assert issues == []
+    items = find_deleted_items(doc2, datetime(2026, 6, 15))
+    assert len(items) == 1
+    assert items[0].kind == "task" and items[0].obj.name == "Deleted Task"
+    assert items[0].owner.name == "Website"
+
+
+def test_find_deleted_items_legacy_blocks_have_no_timestamp():
+    doc = Document()
+    proj = Project(name="P")
+    doc.projects.append(proj)
+    dead_task = Task(name="Old")
+    dead_task.clocks.append(ClockEntry(start=datetime(2026, 1, 1, 9, 0),
+                                       end=datetime(2026, 1, 1, 10, 0)))
+    # a pre-feature tombstone: no :DELETED: marker
+    proj.tombstones.extend(tombstoned(dead_task.lines()))
+
+    items = find_deleted_items(doc, datetime(2026, 6, 1))
+    assert len(items) == 1
+    assert items[0].deleted_at is None
+    assert items[0].obj.name == "Old"
+
+
 def test_clocking():
     doc, _ = parse(SAMPLE)
     other = doc.projects[0].tasks[1]
@@ -255,7 +375,11 @@ if __name__ == "__main__":
                test_created_modified_parse_serialize_resolve_touch,
                test_resolve_project_default_ignores_clockless_task_now,
                test_expunge,
-               test_tombstoned_helper, test_clocking, test_format_issues_flagged,
+               test_tombstoned_helper, test_soft_delete_lines_adds_deleted_marker,
+               test_find_deleted_items_clock_task_project_and_restore,
+               test_find_deleted_items_survives_file_roundtrip,
+               test_find_deleted_items_legacy_blocks_have_no_timestamp,
+               test_clocking, test_format_issues_flagged,
                test_consistency, test_duration_format, test_plausibility_warnings,
                test_parse_user_ts]:
         fn()

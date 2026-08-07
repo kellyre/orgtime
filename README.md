@@ -58,6 +58,7 @@ Press **`?`** inside the app for the full key list.
 | `L`       | Reload file from disk (after hand-editing)                    |
 | `v`       | Verify: consistency check (format + semantic problems)        |
 | `X`       | Expunge: permanently remove all soft-deleted (`##`) lines     |
+| `R`       | Restore a deleted project/task/clock entry (most recent deletion first) |
 | `H`       | Find small overlaps bordering a half-hour and snap them to it |
 | `J`       | Jump to the running clock entry (expands its project and task) |
 | `C`       | Collapse all projects                                        |
@@ -193,6 +194,14 @@ and task, and by day. A clock entry is counted, in full, on the date of its
 start timestamp; running clocks are counted up to generation time and listed
 in a note.
 
+Deleted projects/tasks/clocks still count: reports include soft-deleted time
+within the date range right alongside live entries, so decluttering with `d`
+never costs you credit for the work. Anything reconstructed this way is
+labeled `(deleted)` in the by-project and by-project-and-task sections, so
+the report stays honest about what's currently live — a deleted clock under
+a still-live task is invisible (it just adds to the task's total, same as
+any other entry); a deleted task or project gets its own labeled line.
+
 ### Created / modified times
 
 Each project and task carries a created and a modified timestamp, stored on a
@@ -284,6 +293,18 @@ them (a deleted `# comment` therefore becomes `###`). Lines starting with
 two or more `#` are invisible in the app but stay in the file, so nothing
 is ever lost: hand-remove the `##` and press `L` to resurrect something,
 or press `X` to expunge all soft-deleted lines for good.
+
+Press `R` to restore a deleted project, task, or clock entry the easy way,
+without hand-editing. It lists every individually-restorable deletion —
+most recently deleted first — with what it was, where it lived, and when it
+was deleted; pick one to bring it back exactly where it was, still-deleted
+content nested inside it (e.g. a clock you deleted before later deleting
+its whole task) included, still deleted. Deleted comment blocks aren't
+listed (nothing to restore them "as" — they have no independent identity or
+timestamp); they stay invisible until expunged or hand-edited, same as
+today. Deletions from before this feature don't have a recorded deletion
+time and sort last, but are still restorable when their structure is still
+recognizable.
 
 Hand-edit freely, then press `L` to reload in the app. Malformed lines are
 reported at load time; `v` (verify) additionally flags semantic problems:

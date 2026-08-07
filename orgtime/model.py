@@ -49,6 +49,7 @@ _TASK_RE = re.compile(r"^\*\*\s+(?:(\S+)\s+)?(?:\[#(\d+)\]\s+)?(.+?)\s*$")
 _DESC_RE = re.compile(r"^\s*:DESCRIPTION:\s?(.*?)\s*$")
 _CREATED_RE = re.compile(r":CREATED:\s*" + _TS_RE)
 _MODIFIED_RE = re.compile(r":MODIFIED:\s*" + _TS_RE)
+_DELETED_RE = re.compile(r":DELETED:\s*" + _TS_RE)
 
 
 def parse_user_ts(text: str, base: datetime | None = None) -> datetime | None:
@@ -134,6 +135,18 @@ def tombstoned(lines: list[str]) -> list[str]:
     """Prefix lines with ## for soft deletion (comments get ### total)."""
     return [("##" + line) if line.startswith("#") else ("## " + line)
             for line in lines]
+
+
+def soft_delete_lines(lines: list[str], now: datetime | None = None) -> list[str]:
+    """Tombstone ``lines`` for a delete action, the way ``delete()`` should
+    call this rather than ``tombstoned()`` directly.
+
+    Prepends a ``:DELETED: [timestamp]`` marker line before tombstoning, so
+    this specific deletion event can later be found, reported on, or
+    reversed -- see ``find_deleted_items`` / ``Document.restore``.
+    """
+    now = now or datetime.now()
+    return tombstoned([f":DELETED: {format_ts(now)}"] + lines)
 
 
 @dataclass
@@ -323,6 +336,19 @@ class Document:
             lst.clear()
         return count
 
+    def restore(self, item: "DeletedItem") -> None:
+        """Undo one deletion found by ``find_deleted_items``: removes its
+        raw tombstone lines and reinserts the reconstructed object into the
+        live tree. Any still-tombstoned content nested inside it (e.g. a
+        clock that was already deleted before its task was) stays deleted."""
+        del item._source[item._start:item._end]
+        if item.kind == "project":
+            self.projects.append(item.obj)
+        elif item.kind == "task":
+            item.owner.tasks.append(item.obj)
+        elif item.kind == "clock":
+            item.owner.clocks.append(item.obj)
+
     # -- persistence ------------------------------------------------------
 
     def serialize(self) -> str:
@@ -480,6 +506,163 @@ def parse(text: str) -> tuple[Document, list[str]]:
             issues.append(f"line {lineno}: unrecognized line: {stripped}")
 
     return doc, issues
+
+
+# -- reconstructing deleted items -------------------------------------------
+#
+# A soft-deleted project/task/clock isn't kept as a structured object -- it's
+# serialized back to text and stored as opaque ``##``-prefixed lines on the
+# nearest surviving ancestor (see the module docstring).  To power reports
+# and undelete, we peel exactly one layer of that wrapping back off and feed
+# the result through ``parse()`` again (wrapping orphaned task/clock text in
+# a throwaway synthetic header, if needed, so parse() has the context it
+# expects) -- reusing the real parser rather than a second one.
+#
+# ``delete()`` (see soft_delete_lines) prepends a ``:DELETED: [timestamp]``
+# marker to every deletion going forward, which unambiguously delimits one
+# deletion event from the next in a list that may hold several over time.
+# Deletions made before this marker existed fall back to splitting on
+# structural headers alone (best-effort: a trailing deleted comment with no
+# header of its own can't be reliably delimited, so it's simply left out).
+
+def _peel_layer(line: str) -> str:
+    """Reverse exactly one application of ``tombstoned()`` on one line."""
+    if len(line) > 2 and line[2] == "#":
+        return line[2:]
+    return line[3:]
+
+
+def _deleted_block_kind(line: str) -> str:
+    """Classify a (peeled) content line the same way parse() dispatches on
+    it. 'comment' means "not independently restorable"."""
+    if line.startswith("** "):
+        return "task"
+    if line.startswith("* "):
+        return "project"
+    if line.strip().startswith("CLOCK:"):
+        return "clock"
+    return "comment"
+
+
+@dataclass
+class _DeletedBlock:
+    kind: str                    # "project" | "task" | "clock" | "comment"
+    start: int                   # index range into the ORIGINAL tombstones
+    end: int                     # list this was split from (exclusive end)
+    deleted_at: datetime | None
+    text: str                    # peeled body, ready for a synthetic re-parse
+
+
+def _split_deleted_blocks(lines: list[str], boundary_kind: str) -> list[_DeletedBlock]:
+    """Split one ``tombstones`` list into per-deletion blocks.
+
+    ``boundary_kind`` is the kind of header this list's *direct* children
+    have ("project" for Document.tombstones, "task" for a Project's, "clock"
+    for a Task's) -- content of other kinds (e.g. a CLOCK line inside a
+    deleted task's own dump) is nested detail, never a new block boundary.
+    """
+    peeled = [_peel_layer(l) for l in lines]
+    blocks: list[_DeletedBlock] = []
+    start = 0
+    deleted_at: datetime | None = None
+    skip_boundary_check_at: int | None = None
+
+    def flush(end: int) -> None:
+        nonlocal deleted_at
+        if end > start:
+            body = peeled[start:end]
+            kind = "comment"
+            for pl in body:
+                if _DELETED_RE.match(pl.strip()):
+                    continue
+                if pl.strip():
+                    kind = _deleted_block_kind(pl)
+                    break
+            blocks.append(_DeletedBlock(kind, start, end, deleted_at,
+                                        "\n".join(body)))
+        deleted_at = None
+
+    for i, pl in enumerate(peeled):
+        stripped = pl.strip()
+        m = _DELETED_RE.match(stripped)
+        if m:
+            flush(i)
+            start = i
+            deleted_at = _parse_ts(m.group(1), m.group(3), 0, [])
+            skip_boundary_check_at = i + 1  # the marker's own header line
+            continue
+        if i == skip_boundary_check_at or not stripped:
+            continue
+        if _deleted_block_kind(stripped) == boundary_kind and i != start:
+            flush(i)
+            start = i
+    flush(len(peeled))
+    return blocks
+
+
+def _reconstruct_deleted(block: _DeletedBlock):
+    """Turn a restorable ``_DeletedBlock`` back into a live Project, Task,
+    or ClockEntry via ``parse()``. Returns None for "comment" blocks (not
+    independently restorable) or if the block failed to parse."""
+    body = "\n".join(ln for ln in block.text.splitlines()
+                     if not _DELETED_RE.match(ln.strip()))
+    if block.kind == "project":
+        doc, _ = parse(body)
+        return doc.projects[0] if doc.projects else None
+    if block.kind == "task":
+        doc, _ = parse("* __restore__\n" + body)
+        if doc.projects and doc.projects[0].tasks:
+            return doc.projects[0].tasks[0]
+        return None
+    if block.kind == "clock":
+        doc, _ = parse("* __restore__\n** TODO __restore__\n" + body)
+        if doc.projects and doc.projects[0].tasks and doc.projects[0].tasks[0].clocks:
+            return doc.projects[0].tasks[0].clocks[0]
+        return None
+    return None
+
+
+@dataclass
+class DeletedItem:
+    """One independently-restorable deletion, found by find_deleted_items."""
+    kind: str                    # "project" | "task" | "clock"
+    obj: object                  # the reconstructed Project | Task | ClockEntry
+    owner: object | None         # live Project (task) / live Task (clock) / None (project)
+    deleted_at: datetime | None
+    _source: list = field(repr=False, default_factory=list)  # the raw tombstones list
+    _start: int = 0
+    _end: int = 0
+
+
+def find_deleted_items(doc: "Document", now: datetime | None = None) -> list[DeletedItem]:
+    """Every individually-restorable deleted project, task, or clock entry,
+    most recently deleted first (deletions with no recorded ``:DELETED:``
+    timestamp -- from before that marker existed -- sort last, oldest)."""
+    now = now or datetime.now()
+    items: list[DeletedItem] = []
+
+    def scan(tomb_list: list[str], owner, boundary_kind: str) -> None:
+        for b in _split_deleted_blocks(tomb_list, boundary_kind):
+            if b.kind != boundary_kind:
+                continue
+            obj = _reconstruct_deleted(b)
+            if obj is not None:
+                items.append(DeletedItem(b.kind, obj, owner, b.deleted_at,
+                                         tomb_list, b.start, b.end))
+
+    scan(doc.tombstones, None, "project")
+    for project in doc.projects:
+        scan(project.tombstones, project, "task")
+        for task in project.tasks:
+            scan(task.tombstones, task, "clock")
+
+    def sort_key(item: DeletedItem):
+        if item.deleted_at is None:
+            return (1, timedelta(0))
+        return (0, now - item.deleted_at)
+
+    items.sort(key=sort_key)
+    return items
 
 
 def _recent_clock_time(clocks: list[ClockEntry]) -> datetime | None:
