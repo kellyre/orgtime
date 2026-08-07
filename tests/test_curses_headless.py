@@ -709,6 +709,42 @@ def _scenario_timeline(stdscr):
         assert on_disk.workday_start == 6 and on_disk.workday_end == 19
 
 
+def _scenario_timeline_edit_delete(stdscr):
+    """e edits and d deletes a clock entry directly from the timeline."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "timelog.org"
+        app = CursesApp(stdscr, path)
+        curses.curs_set(0)
+        app._init_colors()
+        today = date.today()
+        proj = Project(name="Work")
+        task = Task(name="Standup")
+        task.clocks.append(ClockEntry(
+            start=datetime.combine(today, time(9, 0)),
+            end=datetime.combine(today, time(10, 0))))
+        proj.tasks.append(task)
+        app.doc.projects.append(proj)
+        app.doc.save()
+        app.refresh_rows()
+
+        # rows: GAP(7-9), ENTRY(9-10), GAP(10-18) -- move onto the entry (j)
+        # and edit it (keep start, change end to 10:30)
+        KEYS.extend(["j", "e",
+                    "\n",                              # keep the prefilled start
+                    "\x15"] + chars("10:30") + ["\n"]   # new end
+                   + ["q"])
+        app.handle_key("t")
+        assert task.clocks[0].end == datetime.combine(today, time(10, 30))
+
+        # re-enter: still rows GAP/ENTRY/GAP -- move onto the (edited) entry
+        # and delete it
+        KEYS.extend(["j", "d", "y", "q"])
+        app.handle_key("t")
+        assert task.clocks == []
+        assert task.tombstones  # soft-deleted, restorable via R
+        assert task.tombstones[0].startswith("## :DELETED: [")
+
+
 def _scenario_clock_in_focus(stdscr):
     """i (and I) move the cursor onto the freshly created clock entry."""
     with tempfile.TemporaryDirectory() as tmp:
@@ -759,6 +795,8 @@ def main():
             _scenario_staleness(WinProxy(stdscr))
             KEYS.clear()
             _scenario_timeline(WinProxy(stdscr))
+            KEYS.clear()
+            _scenario_timeline_edit_delete(WinProxy(stdscr))
         finally:
             curses.newwin = real_newwin
     curses.wrapper(run_all)

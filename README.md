@@ -239,6 +239,9 @@ shows the day and how much was worked vs. free.
   start/end (defaulting to the whole gap, and constrained to stay inside it),
   then pick a project and task (or make new ones). The gap shrinks, so you
   can keep adding more entries into what's left.
+- Select an **entry** and press `e` to edit its time (or `d` to delete it,
+  soft as always) — the same edit/delete you'd use from the tree, without
+  leaving the timeline.
 - The window isn't a hard limit: `<` / `>` widen it earlier / later, one hour
   at a time, for however far your day actually ran. If entries exist outside
   the current window, a hint (e.g. `+1 earlier (< to expand)`) tells you

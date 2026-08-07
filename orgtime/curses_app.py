@@ -690,12 +690,17 @@ class CursesApp:
             owner.comments.clear()
             self.doc.touch(owner)
         else:
-            task = self.doc.task_of(obj)
-            task.tombstones.extend(soft_delete_lines(obj.lines(), now))
-            task.clocks.remove(obj)
-            self.doc.touch(task)
+            self._remove_clock(self.doc.task_of(obj), obj)
         self.save_and_refresh()
         self.message = "Deleted (kept as ## lines — press X to expunge, R to restore)"
+
+    def _remove_clock(self, task: Task, clock: ClockEntry) -> None:
+        """Tombstone one clock entry and drop it from its task.  Caller must
+        checkpoint() first and confirm with the user; shared by delete()
+        (normal view) and timeline_mode()'s own 'd' key."""
+        task.tombstones.extend(soft_delete_lines(clock.lines(), self._now()))
+        task.clocks.remove(clock)
+        self.doc.touch(task)
 
     def expunge(self) -> None:
         count = self.doc.tombstone_count()
@@ -970,11 +975,12 @@ class CursesApp:
     def timeline_mode(self) -> None:
         """Full-screen view of one day's workday with entries and gaps.
 
-        Navigate rows; on a gap press 'a' (or Enter) to add an entry; '['/']'
-        change day, 'g' jumps to a date, '<'/'>' widen the window earlier/
-        later (beyond the configured default), 'R' resets the window, 'W'
-        saves the current window as the new default, 'u' undoes, 'q'/Esc
-        returns.
+        Navigate rows; on a gap press 'a' (or Enter) to add an entry; on an
+        entry press 'e' to edit its time or 'd' to delete it (same as the
+        normal view); '['/']' change day, 'g' jumps to a date, '<'/'>' widen
+        the window earlier/later (beyond the configured default), 'R' resets
+        the window, 'W' saves the current window as the new default, 'u'
+        undoes, 'q'/Esc returns.
         """
         day = date.today()
         cursor = 0
@@ -1031,6 +1037,21 @@ class CursesApp:
                     self._add_in_gap(rows[cursor])
                 else:
                     self.message = "Select a gap to add an entry"
+            elif ch == "e":
+                if 0 <= cursor < len(rows) and rows[cursor].kind == ENTRY:
+                    self.edit_clock(rows[cursor].clock)
+                else:
+                    self.message = "Select a time entry to edit"
+            elif ch == "d":
+                if 0 <= cursor < len(rows) and rows[cursor].kind == ENTRY:
+                    row = rows[cursor]
+                    if self.confirm("Delete this clock entry (and its comments)?"):
+                        self.checkpoint()
+                        self._remove_clock(row.task, row.clock)
+                        self.message = ("Deleted (kept as ## lines — press X "
+                                        "to expunge, R to restore)")
+                else:
+                    self.message = "Select a time entry to delete"
             elif ch in ("q", "Q", "\x1b"):
                 break
             elif ch == curses.KEY_RESIZE:
