@@ -78,6 +78,12 @@ change is saved to the file immediately.
 In the multi-line comment editor (`c`): **`Ctrl+O`** saves, **Esc** cancels,
 Enter inserts a newline.
 
+Any popup list of projects or tasks to pick from — moving (`m`), merging
+(`M`), or picking a destination during import — is sorted alphabetically by
+name, regardless of the file's own order ("+ New project"/"+ New task"
+stays pinned at the top). This is separate from the main dashboard's own
+project sort (`z`) and priority mode (`p`), which keep their own orderings.
+
 In single-line prompts (name, search, times): type and press `Enter`; `Esc`
 cancels. New projects/tasks default to priority `#3` and status `TODO` —
 adjust afterward with `1`–`5` and `s`/`S`/`D`. Time fields accept

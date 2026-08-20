@@ -830,6 +830,71 @@ def _scenario_merge_tasks(stdscr):
         assert len(proj.tombstones) > 0
 
 
+def _scenario_modal_lists_are_alphabetical(stdscr):
+    """Project/task choosers (move, merge, import) sort alphabetically,
+    regardless of file/creation order; the main dashboard's own sort modes
+    (z) are untouched by this -- covered separately in test_view.py."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "timelog.org"
+        app = CursesApp(stdscr, path)
+        curses.curs_set(0)
+        app._init_colors()
+
+        # projects created out of alphabetical order
+        zeta = Project(name="Zeta", collapsed=False)
+        alpha = Project(name="Alpha", collapsed=False)
+        mid = Project(name="Mid", collapsed=False)
+        task = Task(name="T")
+        zeta.tasks.append(task)
+        app.doc.projects.extend([zeta, alpha, mid])
+        app.doc.save()
+        app.refresh_rows()
+
+        # move: chooser excludes src (Zeta); first option should be Alpha,
+        # not Mid (file order) or Zeta
+        select(app, task)
+        KEYS.append("\n")  # accept first option
+        app.handle_key("m")
+        assert task in alpha.tasks
+
+        # move back, then to Mid: second option (Zeta, Mid alphabetically
+        # after Alpha) proves the whole list is sorted, not just first/last
+        select(app, task)
+        KEYS.append("\n")  # only Zeta now excluded... options: Mid, Zeta -> Mid
+        app.handle_key("m")
+        assert task in mid.tasks
+
+        # merge: sibling tasks sorted alphabetically too
+        dest = Task(name="Dest")
+        zulu = Task(name="Zulu")
+        echo = Task(name="Echo")
+        mid.tasks.extend([dest, zulu, echo])
+        app.refresh_rows()
+        select(app, dest)
+        KEYS.extend([" ", "\n"])  # toggle first option (should be Echo), confirm
+        KEYS.append("y")
+        app.handle_key("M")
+        assert echo not in mid.tasks and dest.comments == []
+        assert zulu in mid.tasks  # Zulu untouched -- Echo was alphabetically first
+
+        # import choosers: "+ New" stays pinned at top, then alphabetical --
+        # give Alpha two tasks out of alphabetical order to prove it
+        zulu2 = Task(name="Zulu2")
+        beta2 = Task(name="Beta2")
+        alpha.tasks.extend([zulu2, beta2])
+        app.refresh_rows()
+        csv_path = Path(tmp) / "cal.csv"
+        csv_path.write_text(SAMPLE_CSV, encoding="utf-8")
+        KEYS.extend(chars(str(csv_path)) + ["\n"])   # csv path
+        KEYS.extend(["\n"])                           # blackout code default
+        KEYS.extend(["\n", "\n"])                     # start/end blank -> all
+        KEYS.extend(["k"])                            # keep the one candidate
+        KEYS.extend([curses.KEY_DOWN, "\n"])          # project: skip "+New" -> Alpha
+        KEYS.extend([curses.KEY_DOWN, "\n"])          # task: skip "+New" -> Beta2
+        app.handle_key("A")
+        assert beta2.clocks and not zulu2.clocks
+
+
 def main():
     def run_all(stdscr):
         real_newwin = curses.newwin
@@ -856,6 +921,8 @@ def main():
             _scenario_timeline_edit_delete(WinProxy(stdscr))
             KEYS.clear()
             _scenario_merge_tasks(WinProxy(stdscr))
+            KEYS.clear()
+            _scenario_modal_lists_are_alphabetical(WinProxy(stdscr))
         finally:
             curses.newwin = real_newwin
     curses.wrapper(run_all)

@@ -492,7 +492,8 @@ class CursesApp:
             self.message = "Select a task to move"
             return
         src = self.doc.project_of(task)
-        others = [p for p in self.doc.projects if p is not src]
+        others = sorted((p for p in self.doc.projects if p is not src),
+                        key=lambda p: p.name.lower())
         if not others:
             self.message = "No other project to move to"
             return
@@ -519,7 +520,8 @@ class CursesApp:
             self.message = "Select a task to merge into"
             return
         project = self.doc.project_of(task)
-        others = [t for t in project.tasks if t is not task] if project else []
+        others = sorted((t for t in project.tasks if t is not task),
+                        key=lambda t: t.name.lower()) if project else []
         if not others:
             self.message = "No other task in this project to merge"
             return
@@ -1387,7 +1389,8 @@ class CursesApp:
                 return "quit"
 
     def _choose_project(self):
-        names = ["+ New project"] + [p.name for p in self.doc.projects]
+        projects = sorted(self.doc.projects, key=lambda p: p.name.lower())
+        names = ["+ New project"] + [p.name for p in projects]
         idx = self.prompt_list_choice("Import into project", names, 0)
         if idx is None:
             return None
@@ -1399,10 +1402,11 @@ class CursesApp:
             project = Project(name=name.strip(), created=now, modified=now)
             self.doc.projects.append(project)
             return project
-        return self.doc.projects[idx - 1]
+        return projects[idx - 1]
 
     def _choose_task(self, project, default_name: str):
-        names = ["+ New task"] + [t.name for t in project.tasks]
+        tasks = sorted(project.tasks, key=lambda t: t.name.lower())
+        names = ["+ New task"] + [t.name for t in tasks]
         idx = self.prompt_list_choice(f"Task in {project.name}", names, 0)
         if idx is None:
             return None
@@ -1416,7 +1420,7 @@ class CursesApp:
             project.modified = now
             project.collapsed = False
             return task
-        return project.tasks[idx - 1]
+        return tasks[idx - 1]
 
     def _import_event(self, event, project, task) -> bool:
         """Write one calendar event as a clock on ``task``.  Returns True if
