@@ -402,6 +402,8 @@ HELP_LINES = [
     "                                                    to the half-hour",
     "  u / U            undo / redo      v              verify (consistency)",
     "  r                write report     L              reload file",
+    "  V                open/create this task's Markdown note in VS Code",
+    "                   (notes folder set on first use; edit orgtime.cfg after)",
     "  R                restore a deleted project/task/clock (most recent",
     "                   deletion first)",
     "  q                quit (saves)     ?              this help",

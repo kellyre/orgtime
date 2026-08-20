@@ -30,6 +30,17 @@ def test_save_then_load_roundtrip():
         assert config_path(org_path).parent == org_path.parent
 
 
+def test_notes_dir_roundtrip():
+    with tempfile.TemporaryDirectory() as tmp:
+        org_path = Path(tmp) / "timelog.org"
+        save_config(org_path, Config(notes_dir=r"S:\notes\vault"))
+        cfg = load_config(org_path)
+        assert cfg.notes_dir == r"S:\notes\vault"
+        # unset by default, and the key still shows up (blank) for discovery
+        assert Config().notes_dir == ""
+        assert "notes_dir = " in config_path(org_path).read_text(encoding="utf-8")
+
+
 def test_load_tolerates_comments_and_bad_values():
     with tempfile.TemporaryDirectory() as tmp:
         org_path = Path(tmp) / "timelog.org"

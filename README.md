@@ -58,6 +58,7 @@ Press **`?`** inside the app for the full key list.
 | `r`       | Generate a time report to a text file (prompts for date range)|
 | `L`       | Reload file from disk (after hand-editing)                    |
 | `v`       | Verify: consistency check (format + semantic problems)        |
+| `V`       | Open (or create) this task's Markdown note in VS Code          |
 | `X`       | Expunge: permanently remove all soft-deleted (`##`) lines     |
 | `R`       | Restore a deleted project/task/clock entry (most recent deletion first) |
 | `H`       | Find small overlaps bordering a half-hour and snap them to it |
@@ -308,6 +309,35 @@ combined clocks are re-sorted chronologically, and the now-empty source
 task(s) are soft-deleted — so a report or `R` (restore) can still recover
 one if the merge was a mistake. `M` only offers tasks in the same project;
 use `m` first to move a task over if you want to merge across projects.
+
+### Task notes (VS Code / Obsidian)
+
+`V` opens a Markdown note for the current task in VS Code — handy for
+keeping detailed notes (an Obsidian vault, or any plain folder of `.md`
+files) alongside the time tracking. It needs VS Code's `code` command on
+your `PATH` (its installer offers to add this; if `V` reports `code` not
+found, re-run the installer's "Add to PATH" step or add it by hand).
+
+The first time you press `V`, you're prompted for the notes folder; it's
+then remembered in `orgtime.cfg` as `notes_dir` (hand-editable, same as
+the timeline window settings). If there's no task selected — cursor on a
+project, or nothing clocked yet — you're prompted to pick (or create) a
+project and task first, the same chooser used for imports.
+
+The note's filename is the task's name (sanitized for the filesystem) with
+a `.md` extension. If that file doesn't exist yet, it's created with a
+short header before VS Code opens it:
+
+```
+# Task name
+2026-08-20
+Project: Project name
+Task: Task name
+
+```
+
+If the file already exists, it's opened as-is — nothing is added or
+overwritten, so your notes are never clobbered by revisiting `V`.
 
 ### Soft deletion
 

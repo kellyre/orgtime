@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import copy
 import curses
+import shutil
+import subprocess
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -50,6 +52,7 @@ from .model import (
 )
 from .calimport import parse_csv, plan_import
 from .config import Config, load_config, save_config
+from .notes import note_header, note_path
 from .report import build_report, default_filename
 from .view import (
     COMMENT,
@@ -369,6 +372,8 @@ class CursesApp:
             self.action_redo()
         elif ch == "v":
             self.check()
+        elif ch == "V":
+            self.open_note()
         elif ch == "r":
             self.report()
         elif ch == "L":
@@ -541,6 +546,72 @@ class CursesApp:
         self.save_and_refresh()
         self._select_obj(task)
         self.message = f"Merged {len(sources)} task(s) into '{task.name}'"
+
+    # -- external notes (Obsidian/VS Code) -----------------------------------
+
+    def _launch_editor(self, path: Path) -> bool:
+        """Launch VS Code on ``path``. Returns True on success. A thin,
+        overridable seam so tests don't actually spawn an editor process.
+
+        Resolved via ``shutil.which`` (rather than handing "code" straight
+        to Popen) because on Windows the `code` command is a `code.cmd`
+        shim; Popen's underlying CreateProcess doesn't apply PATHEXT
+        resolution the way a shell does, so a bare ["code", path] silently
+        fails to find it.
+        """
+        code_exe = shutil.which("code")
+        if code_exe is None:
+            return False
+        try:
+            subprocess.Popen([code_exe, str(path)])
+        except OSError:
+            return False
+        return True
+
+    def open_note(self) -> None:
+        """`V`: open (or create) this task's Markdown note in VS Code."""
+        if not self.config.notes_dir:
+            folder = self.prompt(
+                "Notes folder (Obsidian vault, or any folder of .md files)")
+            if folder is None or not folder.strip():
+                return
+            self.config.notes_dir = folder.strip()
+            save_config(self.doc.path, self.config)
+
+        task = self.selected_task()
+        if task is not None:
+            project = self.doc.project_of(task)
+        else:
+            project = self._choose_project()
+            if project is None:
+                return
+            task = self._choose_task(project, default_name="")
+            if task is None:
+                return
+            self.save_and_refresh()
+            self._select_obj(task)
+
+        notes_dir = Path(self.config.notes_dir)
+        try:
+            notes_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            self.message = f"Can't create notes folder: {exc}"
+            return
+
+        dest = note_path(notes_dir, task.name)
+        if not dest.exists():
+            try:
+                dest.write_text(
+                    note_header(dest.stem, project.name, task.name, self._now()),
+                    encoding="utf-8")
+            except OSError as exc:
+                self.message = f"Can't create note: {exc}"
+                return
+
+        if self._launch_editor(dest):
+            self.message = f"Opened note: {dest.name}"
+        else:
+            self.message = f"Wrote {dest.name} — 'code' not found on PATH"
 
     # -- actions: items ----------------------------------------------------
 

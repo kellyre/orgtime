@@ -895,6 +895,69 @@ def _scenario_modal_lists_are_alphabetical(stdscr):
         assert beta2.clocks and not zulu2.clocks
 
 
+def _scenario_open_note(stdscr):
+    """V opens (creating if needed) a task's Markdown note in VS Code."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "timelog.org"
+        notes_dir = Path(tmp) / "vault"
+        app = CursesApp(stdscr, path)
+        curses.curs_set(0)
+        app._init_colors()
+
+        proj = Project(name="Website", collapsed=False)
+        task = Task(name="Design mockups")
+        proj.tasks.append(task)
+        app.doc.projects.append(proj)
+        app.doc.save()
+        app.refresh_rows()
+
+        launched = []
+        app._launch_editor = lambda p: launched.append(p) or True
+
+        # first use: no notes_dir configured -> prompted for one, then saved
+        assert app.config.notes_dir == ""
+        select(app, task)
+        KEYS.extend(chars(str(notes_dir)) + ["\n"])
+        app.handle_key("V")
+        assert app.config.notes_dir == str(notes_dir)
+        dest = notes_dir / "Design mockups.md"
+        assert launched == [dest]
+        assert "Opened note" in app.message
+
+        text = dest.read_text(encoding="utf-8")
+        lines = text.splitlines()
+        assert lines[0] == "# Design mockups"
+        assert lines[2] == "Project: Website"
+        assert lines[3] == "Task: Design mockups"
+        assert text.endswith("\n\n")  # trailing blank line
+
+        # a config file now persists the folder (hand-editable, per orgtime.cfg
+        # convention) so it's remembered on restart
+        cfg2 = curses_app.load_config(path)
+        assert cfg2.notes_dir == str(notes_dir)
+
+        # second use: notes_dir already set -> no prompt, existing file is
+        # opened as-is (not clobbered), even if it's been hand-edited since
+        dest.write_text("MY EDITS\n", encoding="utf-8")
+        select(app, task)
+        app.handle_key("V")
+        assert launched == [dest, dest]
+        assert dest.read_text(encoding="utf-8") == "MY EDITS\n"
+
+        # no current task selected -> prompts for project, then task; picking
+        # "+ New task" creates one and its note
+        select(app, proj)
+        KEYS.extend([curses.KEY_DOWN, "\n"])          # project chooser: Website
+        KEYS.extend(["\n"] + chars("Research doc") + ["\n"])  # +New task, name it
+        app.handle_key("V")
+        new_task = next(t for t in proj.tasks if t.name == "Research doc")
+        assert app.selected_obj() is new_task
+        new_dest = notes_dir / "Research doc.md"
+        assert launched[-1] == new_dest
+        assert new_dest.exists()
+        assert "Project: Website" in new_dest.read_text(encoding="utf-8")
+
+
 def main():
     def run_all(stdscr):
         real_newwin = curses.newwin
@@ -923,6 +986,8 @@ def main():
             _scenario_merge_tasks(WinProxy(stdscr))
             KEYS.clear()
             _scenario_modal_lists_are_alphabetical(WinProxy(stdscr))
+            KEYS.clear()
+            _scenario_open_note(WinProxy(stdscr))
         finally:
             curses.newwin = real_newwin
     curses.wrapper(run_all)
