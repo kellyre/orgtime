@@ -315,6 +315,32 @@ class Document:
         clock.end = max(now, clock.start)
         return task
 
+    # -- merging ------------------------------------------------------------
+
+    def merge_tasks(self, dest: Task, sources: list[Task],
+                     now: datetime | None = None) -> None:
+        """Fold each of ``sources`` into ``dest``: their clock entries (each
+        keeping its own comments) and task-level comments move onto
+        ``dest``, combined clocks are re-sorted chronologically, and each
+        now-emptied source is soft-deleted.  ``sources`` must be tasks of
+        the same project as ``dest``; anything else (or ``dest`` itself) is
+        skipped.
+        """
+        now = now or datetime.now()
+        project = self.project_of(dest)
+        if project is None:
+            return
+        for src in sources:
+            if src is dest or src not in project.tasks:
+                continue
+            dest.clocks = sorted(dest.clocks + src.clocks, key=lambda c: c.start)
+            dest.comments.extend(src.comments)
+            src.clocks = []
+            src.comments = []
+            project.tombstones.extend(soft_delete_lines(src.lines(), now))
+            project.tasks.remove(src)
+        self.touch(dest, now)
+
     # -- soft deletion ------------------------------------------------------
 
     def _tombstone_lists(self):

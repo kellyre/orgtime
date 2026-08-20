@@ -280,6 +280,62 @@ def test_find_deleted_items_legacy_blocks_have_no_timestamp():
     assert items[0].obj.name == "Old"
 
 
+def test_merge_tasks_moves_clocks_and_comments_and_deletes_sources():
+    doc = Document()
+    proj = Project(name="Website")
+    dest = Task(name="Design", comments=["keep A"])
+    dest.clocks.append(ClockEntry(start=datetime(2026, 6, 9, 9, 0),
+                                  end=datetime(2026, 6, 9, 10, 0)))
+    src1 = Task(name="Design v2", comments=["b note"])
+    src1_clock = ClockEntry(start=datetime(2026, 6, 9, 11, 0),
+                            end=datetime(2026, 6, 9, 12, 0),
+                            comments=["clock note"])
+    src1.clocks.append(src1_clock)
+    src2 = Task(name="Design v3", comments=["c note"])
+    proj.tasks.extend([dest, src1, src2])
+    doc.projects.append(proj)
+
+    now = datetime(2026, 6, 12, 8, 0)
+    doc.merge_tasks(dest, [src1, src2], now)
+
+    # comments and clocks landed on dest, in chronological clock order
+    assert dest.comments == ["keep A", "b note", "c note"]
+    assert [c.start for c in dest.clocks] == [
+        datetime(2026, 6, 9, 9, 0), datetime(2026, 6, 9, 11, 0)]
+    moved_clock = dest.clocks[1]
+    assert moved_clock.comments == ["clock note"]
+
+    # sources are gone from the project, emptied, and tombstoned
+    assert [t.name for t in proj.tasks] == ["Design"]
+    assert len(proj.tombstones) > 0
+
+    # modified time bumped on dest and its project
+    assert dest.modified == now
+    assert proj.modified == now
+
+    # the merged-away tasks show up as ordinary deletions
+    items = find_deleted_items(doc, now + timedelta(days=1))
+    assert {it.obj.name for it in items} == {"Design v2", "Design v3"}
+    assert all(it.owner is proj for it in items)
+
+
+def test_merge_tasks_skips_dest_and_foreign_tasks():
+    doc = Document()
+    proj = Project(name="Website")
+    dest = Task(name="Design")
+    other_proj = Project(name="Admin")
+    foreign = Task(name="Not here")
+    other_proj.tasks.append(foreign)
+    proj.tasks.append(dest)
+    doc.projects.extend([proj, other_proj])
+
+    doc.merge_tasks(dest, [dest, foreign], datetime(2026, 6, 12))
+
+    assert proj.tasks == [dest]
+    assert other_proj.tasks == [foreign]
+    assert proj.tombstones == []
+
+
 def test_clocking():
     doc, _ = parse(SAMPLE)
     other = doc.projects[0].tasks[1]
@@ -379,6 +435,8 @@ if __name__ == "__main__":
                test_find_deleted_items_clock_task_project_and_restore,
                test_find_deleted_items_survives_file_roundtrip,
                test_find_deleted_items_legacy_blocks_have_no_timestamp,
+               test_merge_tasks_moves_clocks_and_comments_and_deletes_sources,
+               test_merge_tasks_skips_dest_and_foreign_tasks,
                test_clocking, test_format_issues_flagged,
                test_consistency, test_duration_format, test_plausibility_warnings,
                test_parse_user_ts]:

@@ -327,6 +327,8 @@ class CursesApp:
             self.search()
         elif ch == "m":
             self.move_task()
+        elif ch == "M":
+            self.merge_tasks()
         elif ch in ("\n", "\r", curses.KEY_ENTER, " ", "\t"):
             self.toggle_collapse()
         elif ch == "N":
@@ -508,6 +510,35 @@ class CursesApp:
         self.save_and_refresh()
         self._select_obj(task)
         self.message = f"Moved '{task.name}' to {dest.name}"
+
+    # -- merge tasks together ------------------------------------------------
+
+    def merge_tasks(self) -> None:
+        task = self.selected_task()
+        if task is None:
+            self.message = "Select a task to merge into"
+            return
+        project = self.doc.project_of(task)
+        others = [t for t in project.tasks if t is not task] if project else []
+        if not others:
+            self.message = "No other task in this project to merge"
+            return
+        idxs = self.prompt_checklist_choice(
+            f"Merge into '{task.name}'", [t.name for t in others])
+        if not idxs:
+            self.message = "Merge cancelled"
+            return
+        sources = [others[i] for i in idxs]
+        names = ", ".join(f"'{t.name}'" for t in sources)
+        if not self.confirm(
+                f"Merge {names} into '{task.name}'? Their time entries and "
+                f"comments move over; the emptied task(s) are deleted."):
+            return
+        self.checkpoint()
+        self.doc.merge_tasks(task, sources, self._now())
+        self.save_and_refresh()
+        self._select_obj(task)
+        self.message = f"Merged {len(sources)} task(s) into '{task.name}'"
 
     # -- actions: items ----------------------------------------------------
 
@@ -1554,6 +1585,65 @@ class CursesApp:
                 index = len(options) - 1
             elif ch in ("\n", "\r", curses.KEY_ENTER):
                 return index
+            elif ch == "\x1b":
+                return None
+
+    def prompt_checklist_choice(self, label: str,
+                                options: list[str]) -> list[int] | None:
+        """Vertical scrolling checklist (one option per line).
+
+        Up/Down (or j/k) move, Space toggles the current option, Enter
+        confirms (returns the sorted list of selected indices, possibly
+        empty), Esc cancels (returns None); g/G jump to the ends.
+        """
+        if not options:
+            return []
+        maxy, maxx = self.stdscr.getmaxyx()
+        width = min(maxx - 2, max([len(label)] + [len(o) for o in options]) + 10)
+        width = max(width, 36)
+        height = min(maxy - 2, len(options) + 3)
+        win = self._centered_win(height, width)
+        h, w = win.getmaxyx()
+        win.addstr(0, 2, f" {label[: w - 6]} ")
+        view_h = h - 2                 # option rows (1 .. h-2); h-1 is the hint
+        index = 0
+        offset = 0
+        selected: set[int] = set()
+        while True:
+            if index < offset:
+                offset = index
+            elif index >= offset + view_h:
+                offset = index - view_h + 1
+            for i in range(view_h):
+                oi = offset + i
+                win.addstr(i + 1, 1, " " * (w - 2))
+                if oi < len(options):
+                    attr = curses.A_REVERSE if oi == index else curses.A_NORMAL
+                    cursor = ">" if oi == index else " "
+                    box = "[x]" if oi in selected else "[ ]"
+                    win.addstr(i + 1, 2,
+                               f"{cursor} {box} {options[oi]}"[: w - 4], attr)
+            more = "  (more)" if len(options) > view_h else ""
+            hint = "Space toggle, Enter confirm, Esc cancel" + more
+            win.addstr(h - 1, 2, hint[: w - 4])
+            win.refresh()
+            ch = win.get_wch()
+            if ch in (curses.KEY_UP, "k"):
+                index = (index - 1) % len(options)
+            elif ch in (curses.KEY_DOWN, "j"):
+                index = (index + 1) % len(options)
+            elif ch == curses.KEY_NPAGE:
+                index = min(len(options) - 1, index + view_h)
+            elif ch == curses.KEY_PPAGE:
+                index = max(0, index - view_h)
+            elif ch in (curses.KEY_HOME, "g"):
+                index = 0
+            elif ch in (curses.KEY_END, "G"):
+                index = len(options) - 1
+            elif ch == " ":
+                selected.symmetric_difference_update({index})
+            elif ch in ("\n", "\r", curses.KEY_ENTER):
+                return sorted(selected)
             elif ch == "\x1b":
                 return None
 

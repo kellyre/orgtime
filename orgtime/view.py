@@ -392,6 +392,7 @@ HELP_LINES = [
     "                   sorted by priority; s/S/D/1-5 work there too;",
     "                   i clocks in and returns here",
     "  /                search (repeat with /)  m       move task to project",
+    "  M                merge other task(s) into this one (same project)",
     "  N                new project      n              new task",
     "  e                edit item        d              delete (soft)",
     "  c                add/edit comment X              expunge ## lines",

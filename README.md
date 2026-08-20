@@ -48,6 +48,7 @@ Press **`?`** inside the app for the full key list.
 | `d`       | Delete selected (soft, with confirmation)                     |
 | `c`       | Add/edit the comment below the selected line (multi-line)     |
 | `m`       | Move the selected task to a different project                  |
+| `M`       | Merge one or more sibling tasks (same project) into the selected task |
 | `i` / `o` | Clock in / out now (clock-in clocks out anything running)     |
 | `I` / `O` | Clock in / out at a time you type (late starts, forgotten stops) |
 | `s` / `S` | Scroll task status forward / backward through the cycle        |
@@ -288,6 +289,19 @@ The importer reads the `Subject`, `Start/End Date/Time`, `All day event`, and
 The file is copied to `backups/<name>_<YYYYMMDD-HHMMSS>.org` each time the app
 starts and again when an import begins, so you can roll back. (Cleanup of old
 backups is up to you for now.)
+
+### Merging tasks
+
+Sometimes a task turns out to be a duplicate, or you split work into several
+tasks and later want them tracked as one. Select the task you want to keep
+and press `M`; a checklist of its sibling tasks (same project) appears —
+`space` toggles an entry, `Enter` confirms the picks, `Esc` cancels. After a
+final confirmation, each picked task's clock entries (with their own
+comments intact) and task-level comments move onto the selected task, the
+combined clocks are re-sorted chronologically, and the now-empty source
+task(s) are soft-deleted — so a report or `R` (restore) can still recover
+one if the merge was a mistake. `M` only offers tasks in the same project;
+use `m` first to move a task over if you want to merge across projects.
 
 ### Soft deletion
 

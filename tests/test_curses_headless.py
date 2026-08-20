@@ -773,6 +773,63 @@ def _scenario_clock_in_focus(stdscr):
         assert app.selected_obj() is task.clocks[-1]
 
 
+def _scenario_merge_tasks(stdscr):
+    """M merges checklist-picked sibling task(s) into the selected task."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "timelog.org"
+        app = CursesApp(stdscr, path)
+        curses.curs_set(0)
+        app._init_colors()
+
+        proj = Project(name="P", collapsed=False)
+        dest = Task(name="Dest", comments=["keep"])
+        dest.clocks.append(ClockEntry(start=datetime(2026, 6, 1, 9, 0),
+                                      end=datetime(2026, 6, 1, 10, 0)))
+        src_a = Task(name="A", comments=["a note"])
+        src_a.clocks.append(ClockEntry(start=datetime(2026, 6, 1, 11, 0),
+                                       end=datetime(2026, 6, 1, 12, 0)))
+        src_b = Task(name="B")
+        proj.tasks.extend([dest, src_a, src_b])
+        app.doc.projects.append(proj)
+        app.doc.save()
+        app.refresh_rows()
+
+        # a lone task with no siblings can't merge
+        lonely_proj = Project(name="Solo", collapsed=False)
+        lonely_task = Task(name="Only")
+        lonely_proj.tasks.append(lonely_task)
+        app.doc.projects.append(lonely_proj)
+        app.refresh_rows()
+        select(app, lonely_task)
+        app.handle_key("M")
+        assert "No other task" in app.message
+
+        # cancel out of the checklist -> nothing changes
+        select(app, dest)
+        KEYS.append("\x1b")
+        app.handle_key("M")
+        assert app.message == "Merge cancelled"
+        assert [t.name for t in proj.tasks] == ["Dest", "A", "B"]
+
+        # confirm the checklist but decline the final confirmation -> no-op
+        KEYS.extend([" ", "\n"])  # select "A" (first option), confirm checklist
+        KEYS.append("n")          # decline the "Merge ... ?" prompt
+        app.handle_key("M")
+        assert [t.name for t in proj.tasks] == ["Dest", "A", "B"]
+
+        # select both A and B, confirm the checklist, confirm the merge
+        select(app, dest)
+        KEYS.extend([" ", "j", " ", "\n"])  # toggle A, move down, toggle B, confirm
+        KEYS.append("y")
+        app.handle_key("M")
+        assert [t.name for t in proj.tasks] == ["Dest"]
+        assert dest.comments == ["keep", "a note"]
+        assert [c.start for c in dest.clocks] == [
+            datetime(2026, 6, 1, 9, 0), datetime(2026, 6, 1, 11, 0)]
+        assert app.selected_obj() is dest
+        assert len(proj.tombstones) > 0
+
+
 def main():
     def run_all(stdscr):
         real_newwin = curses.newwin
@@ -797,6 +854,8 @@ def main():
             _scenario_timeline(WinProxy(stdscr))
             KEYS.clear()
             _scenario_timeline_edit_delete(WinProxy(stdscr))
+            KEYS.clear()
+            _scenario_merge_tasks(WinProxy(stdscr))
         finally:
             curses.newwin = real_newwin
     curses.wrapper(run_all)
