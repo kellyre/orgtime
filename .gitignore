@@ -1,6 +1,7 @@
 venv/
 __pycache__/
 timelog.org
+orgtime.cfg
 *.py[cod]
 *.egg-info/
 dist/
