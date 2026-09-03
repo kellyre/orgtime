@@ -2,10 +2,18 @@
 
 from datetime import datetime, timedelta
 
-from orgtime.model import Document, parse
+from orgtime.model import (
+    ClockEntry,
+    Document,
+    EXPAND_COLLAPSED,
+    EXPAND_FULL,
+    EXPAND_PARTIAL,
+    parse,
+)
 from orgtime.view import (
     CLOCK,
     COMMENT,
+    MORE,
     PROJECT,
     TASK,
     CommentRef,
@@ -41,7 +49,7 @@ def test_flatten_full_tree():
     # everything expanded by default (projects expanded, tasks expanded here)
     for p in doc.projects:
         for t in p.tasks:
-            t.collapsed = False
+            t.expand = EXPAND_FULL
     rows = flatten(doc, NOW)
     # project, its comment, task, task comment, clock, clock comment, task2,
     # project2, task, clock
@@ -62,14 +70,14 @@ def test_collapse_hides_descendants():
     # collapsed project shows only itself; second project expands but its
     # task stays collapsed (tasks default to collapsed), hiding the clock
     assert kinds(rows) == [PROJECT, PROJECT, TASK]
-    doc.projects[1].tasks[0].collapsed = False
+    doc.projects[1].tasks[0].expand = EXPAND_FULL
     rows = flatten(doc, NOW)
     assert kinds(rows) == [PROJECT, PROJECT, TASK, CLOCK]
 
 
 def test_collapsed_task_hides_clocks_and_comments():
     doc, _ = parse(SAMPLE)
-    doc.projects[0].tasks[0].collapsed = True
+    doc.projects[0].tasks[0].expand = EXPAND_COLLAPSED
     rows = flatten(doc, NOW)
     labels = [r.text for r in rows]
     assert any("Design mockups" in s for s in labels)
@@ -79,6 +87,32 @@ def test_collapsed_task_hides_clocks_and_comments():
     # collapse marker present
     task_row = next(r for r in rows if "Design mockups" in r.text)
     assert task_row.text.lstrip().startswith("+")
+
+
+def test_partial_expand_shows_latest_entry_and_summary():
+    doc, _ = parse(SAMPLE)
+    task = doc.projects[0].tasks[0]  # has 1 clock in SAMPLE; give it 2
+    task.expand = EXPAND_PARTIAL
+    task.clocks.append(ClockEntry(start=datetime(2026, 6, 10, 9, 0),
+                                  end=datetime(2026, 6, 10, 10, 0)))
+    rows = flatten(doc, NOW)
+    labels = [r.text for r in rows]
+    # task comment still shown in partial mode
+    assert any("task note" in s for s in labels)
+    clock_rows = [r for r in rows if r.kind == CLOCK]
+    assert len(clock_rows) == 1
+    assert clock_rows[0].obj.start == datetime(2026, 6, 10, 9, 0)  # most recent
+    assert any(s.strip() == "... (1)" for s in labels)
+    # its own comment (the clock note) is hidden along with the older entry
+    assert not any("clock note" in s for s in labels)
+    # partial marker present
+    task_row = next(r for r in rows if "Design mockups" in r.text)
+    assert task_row.text.lstrip().startswith("~")
+    # a single clock never gets a "..." row even in partial mode
+    solo = doc.projects[1].tasks[0]
+    solo.expand = EXPAND_PARTIAL
+    rows2 = flatten(doc, NOW)
+    assert not any(r.kind == MORE and r.obj.owner is solo for r in rows2)
 
 
 def test_running_and_warn_flags():
@@ -91,7 +125,7 @@ def test_running_and_warn_flags():
 """
     doc, _ = parse(text)
     for t in doc.projects[0].tasks:
-        t.collapsed = False
+        t.expand = EXPAND_FULL
     rows = flatten(doc, NOW)
     long_clock = next(r for r in rows if r.kind == CLOCK and "48:00" in r.text)
     assert long_clock.warn  # 48h flagged
@@ -296,7 +330,7 @@ def test_clocks_shown_most_recent_first():
     doc, issues = parse(CLOCKS_SAMPLE)
     assert issues == []
     task = doc.projects[0].tasks[0]
-    task.collapsed = False
+    task.expand = EXPAND_FULL
     rows = flatten(doc, NOW)
     clock_rows = [r for r in rows if r.kind == CLOCK]
     # file order is 6/1, 6/3, 6/2 (a comment sits between the last two
@@ -377,6 +411,7 @@ def test_next_match_index_wraps_and_loops():
 if __name__ == "__main__":
     for fn in [test_flatten_full_tree, test_collapse_hides_descendants,
                test_collapsed_task_hides_clocks_and_comments,
+               test_partial_expand_shows_latest_entry_and_summary,
                test_running_and_warn_flags, test_human_duration_in_totals,
                test_search_targets_order_and_kinds,
                test_search_targets_finds_collapsed_content,

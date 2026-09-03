@@ -19,7 +19,15 @@ from datetime import date, datetime, time
 
 from orgtime import curses_app
 from orgtime.curses_app import CursesApp
-from orgtime.model import ClockEntry, Project, Task, parse
+from orgtime.model import (
+    ClockEntry,
+    EXPAND_COLLAPSED,
+    EXPAND_FULL,
+    EXPAND_PARTIAL,
+    Project,
+    Task,
+    parse,
+)
 
 SAMPLE_CSV = (
     "Subject,  Start Date,Start Time,End Date,End Time,All day event,"
@@ -37,7 +45,7 @@ REVERSE_ORDER_CSV = (
     "Foo,6/5/2026,9:00:00 AM,6/5/2026,10:00:00 AM,2\n"
 )
 
-from orgtime.view import PROJECT, CommentRef
+from orgtime.view import CLOCK, MORE, PROJECT, CommentRef, MoreRef
 
 KEYS: deque = deque()
 
@@ -76,7 +84,8 @@ def chars(s: str):
 def select(app, obj):
     for i, row in enumerate(app.rows):
         data = row.obj
-        if data is obj or (isinstance(data, CommentRef) and data.owner is obj):
+        if data is obj or (isinstance(data, (CommentRef, MoreRef))
+                           and data.owner is obj):
             app.cursor = i
             return
     raise AssertionError(f"object not in rows: {obj!r}")
@@ -227,7 +236,7 @@ def _scenario(stdscr):
         app.handle_key("J")  # jump straight to the open CLOCK line
         assert app.selected_obj() is running_clock
         assert app.doc.project_of(task).collapsed is False
-        assert task.collapsed is False
+        assert task.expand == EXPAND_FULL
 
         # -- mark DONE closes the running clock --------------------------
         select(app, task)
@@ -574,7 +583,7 @@ def _scenario_restore(stdscr):
         task_a = Task(name="A")
         task_a.clocks.append(ClockEntry(start=datetime(2026, 6, 1, 9, 0),
                                         end=datetime(2026, 6, 1, 10, 0)))
-        task_b = Task(name="B", collapsed=False)
+        task_b = Task(name="B", expand=EXPAND_FULL)
         dead_clock = ClockEntry(start=datetime(2026, 6, 2, 9, 0),
                                 end=datetime(2026, 6, 2, 10, 0))
         proj.tasks.extend([task_a, task_b])
@@ -771,6 +780,73 @@ def _scenario_clock_in_focus(stdscr):
         app.handle_key("I")
         assert task.clocks[-1].start.strftime("%H:%M") == "08:00"
         assert app.selected_obj() is task.clocks[-1]
+
+
+def _scenario_task_expand_cycle(stdscr):
+    """Space cycles a task collapsed -> partial -> full -> collapsed; other
+    triggers (navigation, status change) leave the state alone."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "timelog.org"
+        app = CursesApp(stdscr, path)
+        curses.curs_set(0)
+        app._init_colors()
+        proj = Project(name="P")
+        task = Task(name="A")
+        task.clocks.append(ClockEntry(start=datetime(2026, 6, 1, 9, 0),
+                                      end=datetime(2026, 6, 1, 10, 0)))
+        task.clocks.append(ClockEntry(start=datetime(2026, 6, 2, 9, 0),
+                                      end=datetime(2026, 6, 2, 10, 0)))
+        proj.tasks.append(task)
+        app.doc.projects.append(proj)
+        app.doc.save()
+        app.refresh_rows()
+
+        # starts collapsed: no CLOCK/MORE rows
+        assert task.expand == EXPAND_COLLAPSED
+        select(app, task)
+        app.handle_key(" ")
+        assert task.expand == EXPAND_PARTIAL
+        clock_rows = [r for r in app.rows if r.kind == CLOCK]
+        more_rows = [r for r in app.rows if r.kind == MORE]
+        assert len(clock_rows) == 1 and len(more_rows) == 1
+        assert clock_rows[0].obj.start == datetime(2026, 6, 2, 9, 0)  # latest
+        assert more_rows[0].text.strip() == "... (1)"
+        assert isinstance(more_rows[0].obj, MoreRef)
+        assert more_rows[0].obj.owner is task
+
+        # navigation and a status change must not touch the expand state
+        app.handle_key("j")
+        app.handle_key("s")
+        assert task.expand == EXPAND_PARTIAL
+
+        # landing on the "..." row and hitting space expands to full
+        for i, row in enumerate(app.rows):
+            if row.kind == MORE:
+                app.cursor = i
+                break
+        else:
+            raise AssertionError("no MORE row found")
+        app.handle_key(" ")
+        assert task.expand == EXPAND_FULL
+        assert len([r for r in app.rows if r.kind == CLOCK]) == 2
+        assert not any(r.kind == MORE for r in app.rows)
+
+        # a third press collapses again
+        select(app, task)
+        app.handle_key(" ")
+        assert task.expand == EXPAND_COLLAPSED
+        assert not any(r.kind in (CLOCK, MORE) for r in app.rows)
+
+        # 'd'/'e' on a "..." row are safe no-ops (not the task itself)
+        app.handle_key(" ")  # -> partial, so a MORE row exists again
+        for i, row in enumerate(app.rows):
+            if row.kind == MORE:
+                app.cursor = i
+                break
+        app.handle_key("d")
+        assert task in proj.tasks  # not deleted
+        app.handle_key("e")
+        assert task.name == "A"  # not renamed
 
 
 def _scenario_merge_tasks(stdscr):
@@ -972,6 +1048,8 @@ def main():
             _scenario_snap(WinProxy(stdscr))
             KEYS.clear()
             _scenario_clock_in_focus(WinProxy(stdscr))
+            KEYS.clear()
+            _scenario_task_expand_cycle(WinProxy(stdscr))
             KEYS.clear()
             _scenario_priority_mode(WinProxy(stdscr))
             KEYS.clear()

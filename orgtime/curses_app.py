@@ -26,6 +26,8 @@ from pathlib import Path
 
 from .model import (
     CLOSED_STATUSES,
+    EXPAND_FULL,
+    EXPAND_STATES,
     STATUSES,
     ClockEntry,
     Document,
@@ -58,11 +60,13 @@ from .view import (
     COMMENT,
     ENTRY,
     GAP,
+    MORE,
     PROJECT,
     SORT_MODES,
     TASK,
     CommentRef,
     HELP_LINES,
+    MoreRef,
     describe_deleted_item,
     flatten,
     next_match_index,
@@ -151,7 +155,10 @@ class CursesApp:
     def refresh_rows(self) -> None:
         """Rebuild the visible-row list, keeping the cursor on the same item."""
         prev = self.selected_obj()
-        prev_owner = prev.owner if isinstance(prev, CommentRef) else None
+        # CommentRef/MoreRef are rebuilt fresh on every flatten() call, so
+        # match those by (type, owner) rather than by identity.
+        prev_owner = getattr(prev, "owner", None)
+        prev_type = type(prev)
         if self.mode == "priority":
             self.rows = priority_rows(self.doc, self._now())
         else:
@@ -160,8 +167,8 @@ class CursesApp:
             for i, row in enumerate(self.rows):
                 obj = row.obj
                 if obj is prev or (
-                    isinstance(obj, CommentRef) and prev_owner is not None
-                    and obj.owner is prev_owner
+                    prev_owner is not None and type(obj) is prev_type
+                    and getattr(obj, "owner", None) is prev_owner
                 ):
                     self.cursor = i
                     break
@@ -173,9 +180,9 @@ class CursesApp:
         return None
 
     def selected_item(self):
-        """Selected object with CommentRef unwrapped to its owner."""
+        """Selected object with CommentRef/MoreRef unwrapped to its owner."""
         obj = self.selected_obj()
-        return obj.owner if isinstance(obj, CommentRef) else obj
+        return obj.owner if isinstance(obj, (CommentRef, MoreRef)) else obj
 
     def selected_task(self) -> Task | None:
         obj = self.selected_item()
@@ -240,6 +247,8 @@ class CursesApp:
             return self.color(CP_STATUS)
         if row.kind == COMMENT:
             return self.color(CP_COMMENT)
+        if row.kind == MORE:
+            return self.color(CP_COMMENT, dim=True)
         return curses.A_NORMAL
 
     def _draw_clockbar(self, y: int, width: int) -> None:
@@ -391,7 +400,11 @@ class CursesApp:
 
     def toggle_collapse(self) -> None:
         obj = self.selected_item()
-        if isinstance(obj, (Project, Task)):
+        if isinstance(obj, Task):
+            i = EXPAND_STATES.index(obj.expand)
+            obj.expand = EXPAND_STATES[(i + 1) % len(EXPAND_STATES)]
+            self.refresh_rows()
+        elif isinstance(obj, Project):
             obj.collapsed = not obj.collapsed
             self.refresh_rows()
 
@@ -420,7 +433,7 @@ class CursesApp:
             return
         project, task, clock = active
         project.collapsed = False
-        task.collapsed = False
+        task.expand = EXPAND_FULL
         self.refresh_rows()
         self._select_obj(clock)
         self.message = f"Jumped to running clock on {task.name}"
@@ -457,7 +470,7 @@ class CursesApp:
 
     def _current_target_index(self, targets) -> int:
         obj = self.selected_obj()
-        owner = obj.owner if isinstance(obj, CommentRef) else obj
+        owner = obj.owner if isinstance(obj, (CommentRef, MoreRef)) else obj
         for i, target in enumerate(targets):
             if target.owner is owner:
                 return i
@@ -479,7 +492,7 @@ class CursesApp:
     def _reveal_and_select(self, target) -> None:
         target.project.collapsed = False
         if target.kind == COMMENT and target.task is not None:
-            target.task.collapsed = False
+            target.task.expand = EXPAND_FULL
         self.refresh_rows()
         if target.kind == COMMENT:
             for i, row in enumerate(self.rows):
@@ -767,6 +780,9 @@ class CursesApp:
         if obj is None:
             self.message = "Nothing selected"
             return
+        if isinstance(obj, MoreRef):
+            self.message = "Nothing to delete here — press space to expand"
+            return
         if isinstance(obj, Project):
             msg = f"Delete project '{obj.name}' and its {len(obj.tasks)} task(s)?"
         elif isinstance(obj, Task):
@@ -836,10 +852,10 @@ class CursesApp:
         # expand whatever ancestors might be collapsed so the restored item
         # (and, for a task, its own clocks) is actually visible afterward
         if item.kind == "task":
-            item.obj.collapsed = False
+            item.obj.expand = EXPAND_FULL
             item.owner.collapsed = False
         elif item.kind == "clock":
-            item.owner.collapsed = False
+            item.owner.expand = EXPAND_FULL
             project = self.doc.project_of(item.owner)
             if project is not None:
                 project.collapsed = False
@@ -868,13 +884,14 @@ class CursesApp:
             lines.pop()
         self.checkpoint()
         owner.comments = lines
-        if isinstance(owner, (Project, Task)):
+        if isinstance(owner, Project):
             owner.collapsed = False
         if isinstance(owner, Task):
+            owner.expand = EXPAND_FULL
             self.doc.project_of(owner).collapsed = False
         elif isinstance(owner, ClockEntry):
             task = self.doc.task_of(owner)
-            task.collapsed = False
+            task.expand = EXPAND_FULL
             self.doc.project_of(task).collapsed = False
         self.doc.touch(owner)
         self.save_and_refresh()
@@ -889,7 +906,7 @@ class CursesApp:
         self.checkpoint()
         self.doc.clock_in(task)
         self.doc.touch(task)
-        task.collapsed = False
+        task.expand = EXPAND_FULL
         self.save_and_refresh()
         self._select_obj(task.clocks[-1])
         self.message = f"Clocked in: {task.name}"
@@ -918,7 +935,7 @@ class CursesApp:
         self.checkpoint()
         self.doc.clock_in(task, when)
         self.doc.touch(task)
-        task.collapsed = False
+        task.expand = EXPAND_FULL
         self.save_and_refresh()
         self._select_obj(task.clocks[-1])
         self.message = f"Clocked in: {task.name} at {when:%H:%M}"
@@ -1320,7 +1337,7 @@ class CursesApp:
         self.checkpoint()
         clock = ClockEntry(start=start, end=end)
         task.clocks.append(clock)
-        task.collapsed = False
+        task.expand = EXPAND_FULL
         self.doc.touch(clock)
         self.doc.save()
         self.message = f"Added {start:%H:%M}-{end:%H:%M} to {task.name}"

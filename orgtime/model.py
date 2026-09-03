@@ -38,6 +38,13 @@ STATUSES = ["TODO", "IN-PROGRESS", "HOLD", "CANCELLED", "DONE"]
 CLOSED_STATUSES = {"CANCELLED", "DONE"}
 DAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
+# Task.expand: how much of a task's clock entries are shown in the tree.
+# COLLAPSED hides comments/clocks entirely; PARTIAL shows only the most
+# recent clock (with its comments) plus a "... (n)" summary of the rest;
+# FULL shows every clock entry and comment.  Cycled by space, in that order.
+EXPAND_COLLAPSED, EXPAND_PARTIAL, EXPAND_FULL = "collapsed", "partial", "full"
+EXPAND_STATES = [EXPAND_COLLAPSED, EXPAND_PARTIAL, EXPAND_FULL]
+
 TS_FORMAT = "%Y-%m-%d %H:%M"  # what users type in edit dialogs
 
 _TS_RE = r"\[(\d{4}-\d{2}-\d{2})(?: ([A-Za-z]{2,3}))? (\d{1,2}:\d{2})\]"
@@ -194,7 +201,7 @@ class Task:
     comments: list[str] = field(default_factory=list)
     tombstones: list[str] = field(default_factory=list)
     clocks: list[ClockEntry] = field(default_factory=list)
-    collapsed: bool = True  # UI state, not saved
+    expand: str = EXPAND_COLLAPSED  # UI state, not saved -- see EXPAND_*
 
     def total_time(self, now: datetime | None = None) -> timedelta:
         return sum((c.duration(now) for c in self.clocks), timedelta())

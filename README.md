@@ -68,13 +68,25 @@ Press **`?`** inside the app for the full key list.
 | `A`       | Import an Outlook calendar CSV export as clock entries         |
 | `t`       | Timeline mode: one day's workday window with gaps, to fill gaps (in timeline: `<`/`>` widen, `R` reset, `W` save as default) |
 | `p`       | Priority mode: flat, cross-project list of open tasks, most urgent first (in priority mode: `s`/`S`/`D`/`1`-`5` also work; `i` clocks in and returns here to normal mode) |
-| `space` / `enter` / `tab` | Collapse / expand the selected project or task |
+| `space` / `enter` / `tab` | Collapse / expand the selected project or task; on a task, cycles collapsed → partial → full → collapsed (see below) |
 | `/`       | Search project/task names and comments; press `/` again to jump to the next match (loops); Esc cancels, leaving you on the current match |
 | `?`       | Show the in-app key list                                     |
 | `q`       | Save and quit                                                 |
 
 Arrow keys / `j` `k` move the cursor; `g` / `G` jump to top / bottom. Every
 change is saved to the file immediately.
+
+A task has three levels of expansion, cycled by `space`/`enter`/`tab`:
+**collapsed** (`+`, nothing beneath it shown), **partial** (`~`, its comments
+plus only the most recent clock entry — with that clock's own comments —
+and a `... (n)` line summarizing the rest), and **full** (`-`, everything).
+A fresh task starts collapsed. This state is per-task and stays as you left
+it across cursor movement, searches, edits, etc. — only pressing
+`space`/`enter`/`tab` on the task (or on its `... (n)` line, which jumps
+straight from partial to full) changes it. A few actions still force a task
+open to `full` so what they just touched is visible: clocking in/out,
+restoring a deletion, adding a calendar entry, editing a comment, and
+jumping to the running clock (`J`) or search (`/`).
 
 In the multi-line comment editor (`c`): **`Ctrl+O`** saves, **Esc** cancels,
 Enter inserts a newline.

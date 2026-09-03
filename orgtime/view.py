@@ -13,6 +13,9 @@ from datetime import date, datetime, time, timedelta
 
 from .model import (
     CLOSED_STATUSES,
+    EXPAND_COLLAPSED,
+    EXPAND_FULL,
+    EXPAND_PARTIAL,
     ClockEntry,
     Document,
     Project,
@@ -23,7 +26,7 @@ from .model import (
     human_duration,
 )
 
-PROJECT, TASK, CLOCK, COMMENT = "project", "task", "clock", "comment"
+PROJECT, TASK, CLOCK, COMMENT, MORE = "project", "task", "clock", "comment", "more"
 
 # fallback workday window for the timeline view, used only if no config
 # default is supplied (see orgtime.config for the persisted default)
@@ -122,6 +125,17 @@ class CommentRef:
         self.owner = owner
 
 
+class MoreRef:
+    """Marker for a task's "... (n)" summary row (partial expansion),
+    tying it back to the task so selection/status/priority actions still
+    resolve to the task even while the cursor sits on this row.  A fresh
+    instance is built on every ``flatten()`` call, like ``CommentRef``.
+    """
+
+    def __init__(self, owner: Task) -> None:
+        self.owner = owner
+
+
 @dataclass
 class Row:
     obj: object          # Project | Task | ClockEntry | CommentRef
@@ -196,7 +210,14 @@ def project_text(project: Project, now: datetime, sort_mode: str = "file") -> st
 
 
 def task_text(task: Task, now: datetime) -> str:
-    marker = "+" if (task.collapsed and (task.comments or task.clocks)) else "-"
+    if not (task.comments or task.clocks):
+        marker = "-"
+    elif task.expand == EXPAND_COLLAPSED:
+        marker = "+"
+    elif task.expand == EXPAND_PARTIAL:
+        marker = "~"
+    else:
+        marker = "-"
     total = task.total_time(now)
     time_part = f"  {human_duration(total)}" if total else ""
     run = "  *RUNNING*" if task.running_clock() else ""
@@ -280,10 +301,14 @@ def flatten(doc: Document, now: datetime | None = None,
             sort_mode: str = "file") -> list[Row]:
     """Walk the document into visible rows, honouring collapse state.
 
-    Project.collapsed hides everything beneath it; Task.collapsed hides the
-    task's comments, clock entries, and clock-attached comments.
-    ``sort_mode`` reorders projects for display only (see ``sorted_projects``).
-    Clock entries are shown most-recent-first (see ``sorted_clocks``).
+    Project.collapsed hides everything beneath it. Task.expand has three
+    levels: EXPAND_COLLAPSED hides the task's comments, clock entries, and
+    clock-attached comments entirely; EXPAND_PARTIAL shows the task's
+    comments and only its most recent clock entry (with that clock's own
+    comments), summarizing the rest as a single "... (n)" row; EXPAND_FULL
+    shows everything. ``sort_mode`` reorders projects for display only (see
+    ``sorted_projects``). Clock entries are shown most-recent-first (see
+    ``sorted_clocks``).
     """
     now = now or datetime.now()
     rows: list[Row] = []
@@ -305,14 +330,20 @@ def flatten(doc: Document, now: datetime | None = None,
             rows.append(Row(task, TASK, 1, task_text(task, now),
                             running=task.running_clock() is not None, warn=warn,
                             stale=task_staleness(task, now)))
-            if task.collapsed:
+            if task.expand == EXPAND_COLLAPSED:
                 continue
             add_comments(task, 2)
-            for clock in sorted_clocks(task):
+            clocks = sorted_clocks(task)
+            partial = task.expand == EXPAND_PARTIAL and len(clocks) > 1
+            for clock in (clocks[:1] if partial else clocks):
                 rows.append(Row(clock, CLOCK, 2, clock_text(clock, now),
                                 warn=bool(clock_warnings(clock, now)),
                                 running=clock.running))
                 add_comments(clock, 3)
+            if partial:
+                hidden = len(clocks) - 1
+                rows.append(Row(MoreRef(task), MORE, 2,
+                                f"{_indent(2)}... ({hidden})"))
     return rows
 
 
@@ -382,6 +413,8 @@ HELP_LINES = [
     "",
     "  Up/Down, j/k     move cursor      Home/End, g/G  top/bottom",
     "  Enter / Space    collapse/expand  Tab            collapse/expand",
+    "                   on a task, cycles collapsed -> partial (latest",
+    "                   entry + \"... (n)\") -> full -> collapsed",
     "  J                jump to running clock   C       collapse all projects",
     "  z                sort projects (file/priority/created/modified)",
     "  A                import Outlook calendar CSV (appointments)",
