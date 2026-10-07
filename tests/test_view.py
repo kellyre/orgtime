@@ -201,27 +201,43 @@ def test_sorted_tasks():
     from orgtime.model import Project, Task
 
     project = Project(name="P")
-    old = Task(name="Old", modified=datetime(2026, 6, 1))
-    mid = Task(name="Mid", modified=datetime(2026, 6, 10))
-    new = Task(name="New", modified=datetime(2026, 6, 20))
-    never_touched = Task(name="NeverTouched")  # modified=None
-    project.tasks.extend([old, new, mid, never_touched])
+    old = Task(name="Old")
+    old.clocks.append(ClockEntry(start=datetime(2026, 6, 1, 9, 0),
+                                 end=datetime(2026, 6, 1, 10, 0)))
+    new = Task(name="New")
+    new.clocks.append(ClockEntry(start=datetime(2026, 6, 20, 9, 0),
+                                 end=datetime(2026, 6, 20, 10, 0)))
+    mid = Task(name="Mid")
+    mid.clocks.append(ClockEntry(start=datetime(2026, 6, 10, 9, 0),
+                                 end=datetime(2026, 6, 10, 10, 0)))
+    never_clocked = Task(name="NeverClocked")  # no clocks at all
+    project.tasks.extend([old, new, mid, never_clocked])
 
-    # most recently modified first; None (never touched) sorts last and
-    # keeps its original relative position among other None ties
+    # most recent clock-in (start time) first; a task with no clocks sorts
+    # last, keeping its original relative position among other such ties
     assert [t.name for t in sorted_tasks(project)] == [
-        "New", "Mid", "Old", "NeverTouched"]
+        "New", "Mid", "Old", "NeverClocked"]
     # the project's own list is untouched (view-only)
-    assert [t.name for t in project.tasks] == ["Old", "New", "Mid", "NeverTouched"]
+    assert [t.name for t in project.tasks] == ["Old", "New", "Mid", "NeverClocked"]
+
+    # a task's `modified` (bumped by renames, comments, priority/status
+    # changes, etc.) must NOT affect the order -- only the clock-in time does
+    old.modified = datetime(2026, 12, 31)  # "touched" long after its clock
+    assert [t.name for t in sorted_tasks(project)] == [
+        "New", "Mid", "Old", "NeverClocked"]
 
 
-def test_flatten_orders_tasks_by_most_recently_modified():
+def test_flatten_orders_tasks_by_most_recent_clock_in():
     from orgtime.model import Project, Task
 
     now = datetime(2026, 6, 18, 12, 0)
     project = Project(name="P", collapsed=False)
-    old = Task(name="Old", modified=now - timedelta(days=5))
-    new = Task(name="New", modified=now - timedelta(hours=1))
+    old = Task(name="Old")
+    old.clocks.append(ClockEntry(start=now - timedelta(days=5),
+                                 end=now - timedelta(days=5) + timedelta(hours=1)))
+    new = Task(name="New")
+    new.clocks.append(ClockEntry(start=now - timedelta(hours=1),
+                                 end=now - timedelta(minutes=30)))
     project.tasks.extend([old, new])  # file order: Old, New
     doc = Document(projects=[project])
 
@@ -463,7 +479,7 @@ if __name__ == "__main__":
                test_search_targets_finds_collapsed_content,
                test_sorted_projects,
                test_sorted_tasks,
-               test_flatten_orders_tasks_by_most_recently_modified,
+               test_flatten_orders_tasks_by_most_recent_clock_in,
                test_timeline_rows_gaps_and_entries,
                test_timeline_empty_day_is_one_gap,
                test_timeline_rows_default_window_is_7_to_18,

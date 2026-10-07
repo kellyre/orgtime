@@ -258,10 +258,13 @@ line under its header:
   view-only sort: your file order on disk is untouched, and it resets to file
   order on restart. When sorting by created/modified, that timestamp is shown
   on each project line.
-- Within a project, tasks are always shown most-recently-modified first —
-  independent of `z`, which only reorders projects. This is also view-only;
-  the file keeps its own task order, and a task with no modified time yet
-  sorts after every task that has one.
+- Within a project, tasks are always shown most-recent-clock-in first —
+  the latest `CLOCK:` start time, not the task's `modified` time (which also
+  bumps for renames, comments, priority/status changes, etc. and would
+  otherwise shuffle the list for reasons that have nothing to do with
+  clocking). Independent of `z`, which only reorders projects. This is also
+  view-only; the file keeps its own task order, and a task with no clocks
+  at all sorts after every task that has one.
 
 ### Timeline mode
 
