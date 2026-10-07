@@ -410,6 +410,22 @@ class CursesApp:
             return raw.owner
         return None
 
+    def _reveal(self, task: Task, clock: ClockEntry | None = None) -> None:
+        """Expand ``task`` just enough to show ``clock`` (or the task
+        itself/its own comments, if ``clock`` is None) -- never downgrading
+        an already-FULL task, and never expanding further than needed.
+        ``clock`` only forces FULL when it isn't the task's latest entry
+        (the one PARTIAL already shows)."""
+        if task.expand == EXPAND_FULL:
+            return
+        if clock is not None:
+            latest = sorted_clocks(task)[0] if task.clocks else None
+            if clock is not latest:
+                task.expand = EXPAND_FULL
+                return
+        if task.expand == EXPAND_COLLAPSED:
+            task.expand = EXPAND_PARTIAL
+
     def toggle_collapse(self) -> None:
         raw = self.selected_obj()
         task = self.selected_task()
@@ -463,7 +479,7 @@ class CursesApp:
             return
         project, task, clock = active
         project.collapsed = False
-        task.expand = EXPAND_FULL
+        self._reveal(task, clock)
         self.refresh_rows()
         self._select_obj(clock)
         self.message = f"Jumped to running clock on {task.name}"
@@ -522,7 +538,8 @@ class CursesApp:
     def _reveal_and_select(self, target) -> None:
         target.project.collapsed = False
         if target.kind == COMMENT and target.task is not None:
-            target.task.expand = EXPAND_FULL
+            clock = target.owner if isinstance(target.owner, ClockEntry) else None
+            self._reveal(target.task, clock)
         self.refresh_rows()
         if target.kind == COMMENT:
             for i, row in enumerate(self.rows):
@@ -880,12 +897,12 @@ class CursesApp:
         self.doc.restore(item)
         self.doc.touch(item.obj)
         # expand whatever ancestors might be collapsed so the restored item
-        # (and, for a task, its own clocks) is actually visible afterward
+        # is actually visible afterward
         if item.kind == "task":
-            item.obj.expand = EXPAND_FULL
+            self._reveal(item.obj)
             item.owner.collapsed = False
         elif item.kind == "clock":
-            item.owner.expand = EXPAND_FULL
+            self._reveal(item.owner, item.obj)
             project = self.doc.project_of(item.owner)
             if project is not None:
                 project.collapsed = False
@@ -917,11 +934,11 @@ class CursesApp:
         if isinstance(owner, Project):
             owner.collapsed = False
         if isinstance(owner, Task):
-            owner.expand = EXPAND_FULL
+            self._reveal(owner)
             self.doc.project_of(owner).collapsed = False
         elif isinstance(owner, ClockEntry):
             task = self.doc.task_of(owner)
-            task.expand = EXPAND_FULL
+            self._reveal(task, owner)
             self.doc.project_of(task).collapsed = False
         self.doc.touch(owner)
         self.save_and_refresh()
@@ -936,7 +953,7 @@ class CursesApp:
         self.checkpoint()
         self.doc.clock_in(task)
         self.doc.touch(task)
-        task.expand = EXPAND_FULL
+        self._reveal(task, task.clocks[-1])
         self.save_and_refresh()
         self._select_obj(task.clocks[-1])
         self.message = f"Clocked in: {task.name}"
@@ -965,7 +982,7 @@ class CursesApp:
         self.checkpoint()
         self.doc.clock_in(task, when)
         self.doc.touch(task)
-        task.expand = EXPAND_FULL
+        self._reveal(task, task.clocks[-1])
         self.save_and_refresh()
         self._select_obj(task.clocks[-1])
         self.message = f"Clocked in: {task.name} at {when:%H:%M}"
@@ -1367,7 +1384,7 @@ class CursesApp:
         self.checkpoint()
         clock = ClockEntry(start=start, end=end)
         task.clocks.append(clock)
-        task.expand = EXPAND_FULL
+        self._reveal(task, clock)
         self.doc.touch(clock)
         self.doc.save()
         self.message = f"Added {start:%H:%M}-{end:%H:%M} to {task.name}"

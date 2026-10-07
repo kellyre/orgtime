@@ -201,7 +201,7 @@ class Task:
     comments: list[str] = field(default_factory=list)
     tombstones: list[str] = field(default_factory=list)
     clocks: list[ClockEntry] = field(default_factory=list)
-    expand: str = EXPAND_PARTIAL  # UI state, not saved -- see EXPAND_*
+    expand: str = EXPAND_COLLAPSED  # UI state, not saved -- see EXPAND_*
 
     def total_time(self, now: datetime | None = None) -> timedelta:
         return sum((c.duration(now) for c in self.clocks), timedelta())

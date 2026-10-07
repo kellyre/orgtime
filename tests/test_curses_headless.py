@@ -783,7 +783,7 @@ def _scenario_clock_in_focus(stdscr):
 
 
 def _scenario_task_expand_cycle(stdscr):
-    """A task opens to partial by default. Space works the same from the
+    """A task opens collapsed by default. Space works the same from the
     task row, its own comments, a clock entry, or a clock's comments,
     cycling partial -> full -> collapsed -> partial. Space on an entry
     OTHER than the most recent one (only reachable while full) instead
@@ -813,7 +813,13 @@ def _scenario_task_expand_cycle(stdscr):
                     return i
             raise AssertionError(f"no comment row for {owner!r}")
 
-        # opens to partial by default, no keypress needed
+        # starts collapsed: nothing (not even the task's own comment) shown
+        assert task.expand == EXPAND_COLLAPSED
+        assert not any(r.kind in (CLOCK, MORE, COMMENT) for r in app.rows)
+
+        # space on the task row cycles collapsed -> partial
+        select(app, task)
+        app.handle_key(" ")
         assert task.expand == EXPAND_PARTIAL
         clock_rows = [r for r in app.rows if r.kind == CLOCK]
         more_rows = [r for r in app.rows if r.kind == MORE]
@@ -856,6 +862,7 @@ def _scenario_task_expand_cycle(stdscr):
         app.handle_key(" ")  # full -> collapsed
         assert task.expand == EXPAND_COLLAPSED
         assert not any(r.kind in (CLOCK, MORE) for r in app.rows)
+        select(app, task)
         app.handle_key(" ")  # collapsed -> partial
         assert task.expand == EXPAND_PARTIAL
 
@@ -886,6 +893,50 @@ def _scenario_task_expand_cycle(stdscr):
         assert task in proj.tasks  # not deleted
         app.handle_key("e")
         assert task.name == "A"  # not renamed
+
+
+def _scenario_reveal_partial_not_full(stdscr):
+    """Clocking in (i) or jumping to the running clock (J) reveals a task
+    to partial, not full -- but never downgrades a task already expanded
+    to full."""
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "timelog.org"
+        app = CursesApp(stdscr, path)
+        curses.curs_set(0)
+        app._init_colors()
+        proj = Project(name="P")
+        task = Task(name="A")
+        other = Task(name="Other")
+        proj.tasks.extend([task, other])
+        app.doc.projects.append(proj)
+        app.doc.save()
+        app.refresh_rows()
+
+        # i on a collapsed task reveals it to partial, not full
+        assert task.expand == EXPAND_COLLAPSED
+        select(app, task)
+        app.handle_key("i")
+        assert task.expand == EXPAND_PARTIAL
+
+        # J (from elsewhere) on that still-partial task leaves it partial
+        select(app, other)
+        app.handle_key("J")
+        assert app.selected_obj() is task.clocks[-1]
+        assert task.expand == EXPAND_PARTIAL
+
+        # expand it to full by hand; clocking out/in again must not
+        # downgrade it back to partial
+        app.handle_key(" ")  # partial -> full (cursor is on the clock)
+        assert task.expand == EXPAND_FULL
+        app.handle_key("o")
+        select(app, task)
+        app.handle_key("i")
+        assert task.expand == EXPAND_FULL
+
+        # J on it, while coming from elsewhere, leaves it full too
+        select(app, other)
+        app.handle_key("J")
+        assert task.expand == EXPAND_FULL
 
 
 def _scenario_merge_tasks(stdscr):
@@ -1089,6 +1140,8 @@ def main():
             _scenario_clock_in_focus(WinProxy(stdscr))
             KEYS.clear()
             _scenario_task_expand_cycle(WinProxy(stdscr))
+            KEYS.clear()
+            _scenario_reveal_partial_not_full(WinProxy(stdscr))
             KEYS.clear()
             _scenario_priority_mode(WinProxy(stdscr))
             KEYS.clear()

@@ -66,31 +66,20 @@ def test_flatten_full_tree():
 def test_collapse_hides_descendants():
     doc, _ = parse(SAMPLE)
     doc.projects[0].collapsed = True
-    # explicitly collapse project 2's task (tasks default to partial, not
-    # collapsed, since Round 23) to isolate project-collapse from task-collapse
-    doc.projects[1].tasks[0].expand = EXPAND_COLLAPSED
     rows = flatten(doc, NOW)
     # collapsed project shows only itself; second project expands but its
-    # task stays collapsed, hiding the clock
+    # task stays collapsed (tasks default to collapsed), hiding the clock
     assert kinds(rows) == [PROJECT, PROJECT, TASK]
     doc.projects[1].tasks[0].expand = EXPAND_FULL
     rows = flatten(doc, NOW)
     assert kinds(rows) == [PROJECT, PROJECT, TASK, CLOCK]
 
 
-def test_task_defaults_to_partial():
+def test_task_defaults_to_collapsed():
     from orgtime.model import Task
 
     task = Task(name="Fresh")
-    assert task.expand == EXPAND_PARTIAL
-    # a brand-new task has no clocks/comments, so partial == collapsed ==
-    # full visually: marker is "-", not the partial "~" (nothing is hidden)
-    assert task_text_marker(task) == "-"
-
-
-def task_text_marker(task):
-    from orgtime.view import task_text
-    return task_text(task, NOW).lstrip()[0]
+    assert task.expand == EXPAND_COLLAPSED
 
 
 def test_collapsed_task_hides_clocks_and_comments():
@@ -113,7 +102,6 @@ def test_partial_expand_shows_latest_entry_and_summary():
     task.expand = EXPAND_PARTIAL
     task.clocks.append(ClockEntry(start=datetime(2026, 6, 10, 9, 0),
                                   end=datetime(2026, 6, 10, 10, 0)))
-    doc.projects[1].tasks[0].expand = EXPAND_COLLAPSED  # not under test here
     rows = flatten(doc, NOW)
     labels = [r.text for r in rows]
     # task comment still shown in partial mode
@@ -429,7 +417,7 @@ def test_next_match_index_wraps_and_loops():
 
 if __name__ == "__main__":
     for fn in [test_flatten_full_tree, test_collapse_hides_descendants,
-               test_task_defaults_to_partial,
+               test_task_defaults_to_collapsed,
                test_collapsed_task_hides_clocks_and_comments,
                test_partial_expand_shows_latest_entry_and_summary,
                test_running_and_warn_flags, test_human_duration_in_totals,

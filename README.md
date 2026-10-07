@@ -68,7 +68,7 @@ Press **`?`** inside the app for the full key list.
 | `A`       | Import an Outlook calendar CSV export as clock entries         |
 | `t`       | Timeline mode: one day's workday window with gaps, to fill gaps (in timeline: `<`/`>` widen, `R` reset, `W` save as default) |
 | `p`       | Priority mode: flat, cross-project list of open tasks, most urgent first (in priority mode: `s`/`S`/`D`/`1`-`5` also work; `i` clocks in and returns here to normal mode) |
-| `space` / `enter` / `tab` | Collapse / expand the selected project; on (or inside) a task, cycles partial → full → collapsed → partial (see below) |
+| `space` / `enter` / `tab` | Collapse / expand the selected project; on (or inside) a task, cycles collapsed → partial → full → collapsed (see below) |
 | `/`       | Search project/task names and comments; press `/` again to jump to the next match (loops); Esc cancels, leaving you on the current match |
 | `?`       | Show the in-app key list                                     |
 | `q`       | Save and quit                                                 |
@@ -80,18 +80,26 @@ A task has three levels of expansion: **collapsed** (`+`, nothing beneath it
 shown), **partial** (`~` when there's more hidden, otherwise `-`; its
 comments plus only the most recent clock entry — with that clock's own
 comments — and a `... (n)` line summarizing the rest), and **full** (`-`,
-everything). A task opens to **partial** by default. This state is per-task
-and stays as you left it across cursor movement, searches, edits, etc. —
-only `space`/`enter`/`tab` changes it, and it works from anywhere inside the
-task: the task row itself, its own comments, a clock entry, or a clock's
-comments all cycle the same task through partial → full → collapsed →
-partial. Pressing it on an older entry (anything but the most recent — only
-reachable while full) instead jumps straight to partial and moves the
-cursor to the most recent entry, rather than collapsing everything away.
-On the `... (n)` summary line it jumps straight from partial to full. A few
-actions still force a task open to `full` so what they just touched is
-visible: clocking in/out, restoring a deletion, adding a calendar entry,
-editing a comment, and jumping to the running clock (`J`) or search (`/`).
+everything). A task opens **collapsed** by default — minimal, so a dashboard
+full of tasks stays compact. This state is per-task and stays as you left it
+across cursor movement, searches, edits, etc. — only `space`/`enter`/`tab`
+changes it, and it works from anywhere inside the task: the task row itself,
+its own comments, a clock entry, or a clock's comments all cycle the same
+task through collapsed → partial → full → collapsed. Pressing it on an
+older entry (anything but the most recent — only reachable while full)
+instead jumps straight to partial and moves the cursor to the most recent
+entry, rather than collapsing everything away. On the `... (n)` summary line
+it jumps straight from partial to full.
+
+A few actions reveal a task rather than leaving it collapsed, since they
+just showed you something inside it: clocking in (`i`/`I`) and jumping to
+the running clock (`J`) reveal it to **partial** — just enough to see the
+entry in question — unless you'd already expanded it to full, which is
+left alone. Restoring a deletion, adding a calendar entry, editing a
+comment, and search (`/`) reveal to whichever level actually makes the
+touched entry visible (partial if it's the most recent entry, full
+otherwise) — again without ever downgrading a task you'd already expanded
+to full.
 
 In the multi-line comment editor (`c`): **`Ctrl+O`** saves, **Esc** cancels,
 Enter inserts a newline.
