@@ -258,6 +258,10 @@ line under its header:
   view-only sort: your file order on disk is untouched, and it resets to file
   order on restart. When sorting by created/modified, that timestamp is shown
   on each project line.
+- Within a project, tasks are always shown most-recently-modified first —
+  independent of `z`, which only reorders projects. This is also view-only;
+  the file keeps its own task order, and a task with no modified time yet
+  sorts after every task that has one.
 
 ### Timeline mode
 

@@ -196,6 +196,44 @@ def test_sorted_projects():
     assert [p.name for p in doc.projects] == ["Alpha", "Beta", "Gamma"]
 
 
+def test_sorted_tasks():
+    from orgtime.view import sorted_tasks
+    from orgtime.model import Project, Task
+
+    project = Project(name="P")
+    old = Task(name="Old", modified=datetime(2026, 6, 1))
+    mid = Task(name="Mid", modified=datetime(2026, 6, 10))
+    new = Task(name="New", modified=datetime(2026, 6, 20))
+    never_touched = Task(name="NeverTouched")  # modified=None
+    project.tasks.extend([old, new, mid, never_touched])
+
+    # most recently modified first; None (never touched) sorts last and
+    # keeps its original relative position among other None ties
+    assert [t.name for t in sorted_tasks(project)] == [
+        "New", "Mid", "Old", "NeverTouched"]
+    # the project's own list is untouched (view-only)
+    assert [t.name for t in project.tasks] == ["Old", "New", "Mid", "NeverTouched"]
+
+
+def test_flatten_orders_tasks_by_most_recently_modified():
+    from orgtime.model import Project, Task
+
+    now = datetime(2026, 6, 18, 12, 0)
+    project = Project(name="P", collapsed=False)
+    old = Task(name="Old", modified=now - timedelta(days=5))
+    new = Task(name="New", modified=now - timedelta(hours=1))
+    project.tasks.extend([old, new])  # file order: Old, New
+    doc = Document(projects=[project])
+
+    rows = flatten(doc, now=now)
+    task_rows = [r for r in rows if r.kind == TASK]
+    assert [r.obj.name for r in task_rows] == ["New", "Old"]
+    # unaffected by project sort_mode -- that only reorders projects
+    rows2 = flatten(doc, now=now, sort_mode="priority")
+    task_rows2 = [r for r in rows2 if r.kind == TASK]
+    assert [r.obj.name for r in task_rows2] == ["New", "Old"]
+
+
 def test_timeline_rows_gaps_and_entries():
     from datetime import date
     from orgtime.view import ENTRY, GAP, timeline_rows
@@ -424,6 +462,8 @@ if __name__ == "__main__":
                test_search_targets_order_and_kinds,
                test_search_targets_finds_collapsed_content,
                test_sorted_projects,
+               test_sorted_tasks,
+               test_flatten_orders_tasks_by_most_recently_modified,
                test_timeline_rows_gaps_and_entries,
                test_timeline_empty_day_is_one_gap,
                test_timeline_rows_default_window_is_7_to_18,

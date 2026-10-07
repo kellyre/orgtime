@@ -181,6 +181,18 @@ def task_staleness(task: Task, now: datetime) -> str:
 SORT_MODES = ["file", "priority", "created", "modified"]
 
 
+def sorted_tasks(project: Project) -> list[Task]:
+    """A project's tasks in display order: most recently modified first.
+
+    Display order only -- the underlying ``project.tasks`` list (and thus
+    the saved file) stays in its own order. Ties (including tasks that
+    have no ``modified`` yet) keep their original relative order, since
+    Python's sort is stable.
+    """
+    return sorted(project.tasks, key=lambda t: t.modified or datetime.min,
+                 reverse=True)
+
+
 def sorted_projects(doc: Document, mode: str) -> list[Project]:
     """Projects in display order for the given sort mode (view-only)."""
     projects = list(doc.projects)
@@ -307,8 +319,9 @@ def flatten(doc: Document, now: datetime | None = None,
     comments and only its most recent clock entry (with that clock's own
     comments), summarizing the rest as a single "... (n)" row; EXPAND_FULL
     shows everything. ``sort_mode`` reorders projects for display only (see
-    ``sorted_projects``). Clock entries are shown most-recent-first (see
-    ``sorted_clocks``).
+    ``sorted_projects``). Within a project, tasks are shown most recently
+    modified first (see ``sorted_tasks``), independent of ``sort_mode``.
+    Clock entries are shown most-recent-first (see ``sorted_clocks``).
     """
     now = now or datetime.now()
     rows: list[Row] = []
@@ -325,7 +338,7 @@ def flatten(doc: Document, now: datetime | None = None,
         if project.collapsed:
             continue
         add_comments(project, 1)
-        for task in project.tasks:
+        for task in sorted_tasks(project):
             warn = any(clock_warnings(c, now) for c in task.clocks)
             rows.append(Row(task, TASK, 1, task_text(task, now),
                             running=task.running_clock() is not None, warn=warn,
