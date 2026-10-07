@@ -45,7 +45,7 @@ REVERSE_ORDER_CSV = (
     "Foo,6/5/2026,9:00:00 AM,6/5/2026,10:00:00 AM,2\n"
 )
 
-from orgtime.view import CLOCK, MORE, PROJECT, CommentRef, MoreRef
+from orgtime.view import CLOCK, COMMENT, MORE, PROJECT, CommentRef, MoreRef
 
 KEYS: deque = deque()
 
@@ -783,40 +783,80 @@ def _scenario_clock_in_focus(stdscr):
 
 
 def _scenario_task_expand_cycle(stdscr):
-    """Space cycles a task collapsed -> partial -> full -> collapsed; other
-    triggers (navigation, status change) leave the state alone."""
+    """A task opens to partial by default. Space works the same from the
+    task row, its own comments, a clock entry, or a clock's comments,
+    cycling partial -> full -> collapsed -> partial. Space on an entry
+    OTHER than the most recent one (only reachable while full) instead
+    jumps straight to partial and moves the cursor to the most recent
+    entry, rather than collapsing everything away."""
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "timelog.org"
         app = CursesApp(stdscr, path)
         curses.curs_set(0)
         app._init_colors()
         proj = Project(name="P")
-        task = Task(name="A")
-        task.clocks.append(ClockEntry(start=datetime(2026, 6, 1, 9, 0),
-                                      end=datetime(2026, 6, 1, 10, 0)))
-        task.clocks.append(ClockEntry(start=datetime(2026, 6, 2, 9, 0),
-                                      end=datetime(2026, 6, 2, 10, 0)))
+        task = Task(name="A", comments=["task note"])
+        older = ClockEntry(start=datetime(2026, 6, 1, 9, 0),
+                           end=datetime(2026, 6, 1, 10, 0),
+                           comments=["older note"])
+        latest = ClockEntry(start=datetime(2026, 6, 2, 9, 0),
+                            end=datetime(2026, 6, 2, 10, 0))
+        task.clocks.extend([older, latest])
         proj.tasks.append(task)
         app.doc.projects.append(proj)
         app.doc.save()
         app.refresh_rows()
 
-        # starts collapsed: no CLOCK/MORE rows
-        assert task.expand == EXPAND_COLLAPSED
-        select(app, task)
-        app.handle_key(" ")
+        def comment_row(owner):
+            for i, row in enumerate(app.rows):
+                if row.kind == COMMENT and row.obj.owner is owner:
+                    return i
+            raise AssertionError(f"no comment row for {owner!r}")
+
+        # opens to partial by default, no keypress needed
         assert task.expand == EXPAND_PARTIAL
         clock_rows = [r for r in app.rows if r.kind == CLOCK]
         more_rows = [r for r in app.rows if r.kind == MORE]
-        assert len(clock_rows) == 1 and len(more_rows) == 1
-        assert clock_rows[0].obj.start == datetime(2026, 6, 2, 9, 0)  # latest
-        assert more_rows[0].text.strip() == "... (1)"
+        assert len(clock_rows) == 1 and clock_rows[0].obj is latest
+        assert len(more_rows) == 1 and more_rows[0].text.strip() == "... (1)"
         assert isinstance(more_rows[0].obj, MoreRef)
         assert more_rows[0].obj.owner is task
+
+        # space on the task's own comment cycles the task, same as its row
+        app.cursor = comment_row(task)
+        app.handle_key(" ")
+        assert task.expand == EXPAND_FULL
+        assert len([r for r in app.rows if r.kind == CLOCK]) == 2
 
         # navigation and a status change must not touch the expand state
         app.handle_key("j")
         app.handle_key("s")
+        assert task.expand == EXPAND_FULL
+
+        # space on the older entry's own comment: "other than current" ->
+        # jumps straight to partial, cursor lands on the latest entry
+        app.cursor = comment_row(older)
+        app.handle_key(" ")
+        assert task.expand == EXPAND_PARTIAL
+        assert app.selected_obj() is latest
+
+        # space on the older entry ITSELF (from full) does the same thing
+        app.handle_key(" ")  # partial -> full
+        select(app, older)
+        app.handle_key(" ")
+        assert task.expand == EXPAND_PARTIAL
+        assert app.selected_obj() is latest
+
+        # space on the latest ("current") entry is the normal cycle, not
+        # the jump -- it's the one entry partial already shows
+        select(app, latest)
+        app.handle_key(" ")
+        assert task.expand == EXPAND_FULL
+
+        app.handle_key(" ")  # full -> collapsed
+        assert task.expand == EXPAND_COLLAPSED
+        assert not any(r.kind in (CLOCK, MORE) for r in app.rows)
+        app.handle_key(" ")  # collapsed -> partial
         assert task.expand == EXPAND_PARTIAL
 
         # landing on the "..." row and hitting space expands to full
@@ -828,10 +868,9 @@ def _scenario_task_expand_cycle(stdscr):
             raise AssertionError("no MORE row found")
         app.handle_key(" ")
         assert task.expand == EXPAND_FULL
-        assert len([r for r in app.rows if r.kind == CLOCK]) == 2
         assert not any(r.kind == MORE for r in app.rows)
 
-        # a third press collapses again
+        # one more press collapses again
         select(app, task)
         app.handle_key(" ")
         assert task.expand == EXPAND_COLLAPSED

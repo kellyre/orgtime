@@ -26,7 +26,9 @@ from pathlib import Path
 
 from .model import (
     CLOSED_STATUSES,
+    EXPAND_COLLAPSED,
     EXPAND_FULL,
+    EXPAND_PARTIAL,
     EXPAND_STATES,
     STATUSES,
     ClockEntry,
@@ -72,6 +74,7 @@ from .view import (
     next_match_index,
     priority_rows,
     search_targets,
+    sorted_clocks,
     timeline_hidden_counts,
     timeline_rows,
 )
@@ -398,13 +401,40 @@ class CursesApp:
         if self.rows:
             self.cursor = max(0, min(self.cursor + delta, len(self.rows) - 1))
 
+    def _related_clock(self, raw) -> ClockEntry | None:
+        """The clock entry a raw row object is "about", if any -- the entry
+        itself, or a comment attached to one."""
+        if isinstance(raw, ClockEntry):
+            return raw
+        if isinstance(raw, CommentRef) and isinstance(raw.owner, ClockEntry):
+            return raw.owner
+        return None
+
     def toggle_collapse(self) -> None:
-        obj = self.selected_item()
-        if isinstance(obj, Task):
-            i = EXPAND_STATES.index(obj.expand)
-            obj.expand = EXPAND_STATES[(i + 1) % len(EXPAND_STATES)]
+        raw = self.selected_obj()
+        task = self.selected_task()
+        if task is not None:
+            clocks = sorted_clocks(task)
+            latest = clocks[0] if clocks else None
+            clock = self._related_clock(raw)
+            if clock is not None and clock is not latest:
+                # sitting on an older entry: back off to partial and land on
+                # the one entry partial shows, rather than collapsing away
+                # everything (space still "toggles the three states" -- this
+                # is just a shortcut to the state that keeps you oriented)
+                task.expand = EXPAND_PARTIAL
+                self.refresh_rows()
+                self._select_obj(latest)
+                return
+            i = EXPAND_STATES.index(task.expand)
+            task.expand = EXPAND_STATES[(i + 1) % len(EXPAND_STATES)]
             self.refresh_rows()
-        elif isinstance(obj, Project):
+            if task.expand == EXPAND_COLLAPSED or (
+                    task.expand == EXPAND_FULL and isinstance(raw, MoreRef)):
+                self._select_obj(task)
+            return
+        obj = self.selected_item()
+        if isinstance(obj, Project):
             obj.collapsed = not obj.collapsed
             self.refresh_rows()
 

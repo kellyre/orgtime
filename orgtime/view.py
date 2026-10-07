@@ -215,7 +215,7 @@ def task_text(task: Task, now: datetime) -> str:
     elif task.expand == EXPAND_COLLAPSED:
         marker = "+"
     elif task.expand == EXPAND_PARTIAL:
-        marker = "~"
+        marker = "~" if len(task.clocks) > 1 else "-"
     else:
         marker = "-"
     total = task.total_time(now)
@@ -413,8 +413,11 @@ HELP_LINES = [
     "",
     "  Up/Down, j/k     move cursor      Home/End, g/G  top/bottom",
     "  Enter / Space    collapse/expand  Tab            collapse/expand",
-    "                   on a task, cycles collapsed -> partial (latest",
-    "                   entry + \"... (n)\") -> full -> collapsed",
+    "                   a task opens to partial (latest entry + \"... (n)\")",
+    "                   by default; from anywhere in it (its comments or",
+    "                   entries) cycles partial -> full -> collapsed ->",
+    "                   partial; on an older entry it jumps straight to",
+    "                   partial instead, landing on the latest entry",
     "  J                jump to running clock   C       collapse all projects",
     "  z                sort projects (file/priority/created/modified)",
     "  A                import Outlook calendar CSV (appointments)",
