@@ -1,9 +1,15 @@
-"""Curses front-end for orgtime — a dependency-free alternative to the
-Textual UI for locked-down environments.
+"""Curses front-end for orgtime — FROZEN / UNMAINTAINED (archived 2026-11-09).
+
+The Textual front-end (``orgtime/textual_app.py``) is now the maintained
+app; this dependency-free curses UI is kept as a working snapshot for
+environments where Textual isn't available, but is no longer updated with
+new features. It consumes the shared, UI-agnostic core in ``orgtime/``
+(model, view, report, config, calimport, notes) via absolute imports, so it
+keeps running as long as those modules' interfaces don't change.
 
 Run with::
 
-    python -m orgtime.curses_app [path/to/file.org]
+    python -m legacy.curses_app [path/to/file.org]
 
 It reuses :mod:`orgtime.model` (parsing, clocking, soft-delete, consistency
 checks) and :mod:`orgtime.view` (row flattening / labels) unchanged, so the
@@ -11,7 +17,8 @@ file format and behaviour match the Textual version.  Cosmetic features that
 depended on Textual (live-ticking clock, blink, rich colours) are dropped.
 
 Note: the Python standard library ships ``curses`` on Linux/macOS but not on
-Windows, so this front-end targets Unix-like systems.
+Windows, where it needs the ``windows-curses`` shim (see
+``legacy/requirements.txt``).
 """
 
 from __future__ import annotations
@@ -24,7 +31,7 @@ import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
-from .model import (
+from orgtime.model import (
     CLOSED_STATUSES,
     EXPAND_COLLAPSED,
     EXPAND_FULL,
@@ -54,11 +61,11 @@ from .model import (
     reshape_to_avoid,
     soft_delete_lines,
 )
-from .calimport import parse_csv, plan_import
-from .config import Config, load_config, save_config
-from .notes import note_header, note_path
-from .report import build_report, default_filename
-from .view import (
+from orgtime.calimport import parse_csv, plan_import
+from orgtime.config import Config, load_config, save_config
+from orgtime.notes import note_header, note_path
+from orgtime.report import build_report, default_filename
+from orgtime.view import (
     COMMENT,
     ENTRY,
     GAP,
@@ -257,7 +264,7 @@ class CursesApp:
     def _draw_clockbar(self, y: int, width: int) -> None:
         active = self.doc.running()
         if active:
-            from .model import human_duration
+            from orgtime.model import human_duration
             project, task, clock = active
             text = (f" RUNNING {human_duration(clock.duration())} on "
                     f"{task.name} ({project.name}, since "
@@ -1302,7 +1309,7 @@ class CursesApp:
 
     def _draw_timeline(self, day, rows, ws, we, cursor,
                        hidden_before: int = 0, hidden_after: int = 0) -> None:
-        from .model import human_duration
+        from orgtime.model import human_duration
         self.stdscr.erase()
         height, width = self.stdscr.getmaxyx()
         worked = sum((r.duration for r in rows if r.kind == ENTRY), timedelta())

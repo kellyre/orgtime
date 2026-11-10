@@ -1,4 +1,7 @@
-"""End-to-end test of the curses UI driving REAL curses.
+"""End-to-end test of the FROZEN curses UI driving REAL curses.
+
+Not part of the routine test suite (see ``legacy/README.md``); kept as a
+working snapshot of the curses front-end.
 
 Runs under ``curses.wrapper`` so every window, the ``textpad`` multi-line
 editor, and colour handling are exercised for real on this platform.  Only
@@ -7,7 +10,7 @@ window (and stdscr) pulls keystrokes from a scripted queue instead of
 blocking on the console.
 
 Requires the ``curses`` module (stdlib on Unix, ``windows-curses`` on
-Windows).  Run:  python tests/test_curses_headless.py
+Windows).  Run:  PYTHONPATH=. python legacy/test_curses_headless.py
 """
 
 import curses
@@ -17,8 +20,8 @@ from pathlib import Path
 
 from datetime import date, datetime, time
 
-from orgtime import curses_app
-from orgtime.curses_app import CursesApp
+from legacy import curses_app
+from legacy.curses_app import CursesApp
 from orgtime.model import (
     ClockEntry,
     EXPAND_COLLAPSED,
