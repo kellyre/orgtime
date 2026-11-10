@@ -4,13 +4,13 @@ A simple terminal time tracker inspired by Emacs org-mode clocking.
 Projects contain tasks; tasks accumulate `CLOCK:` entries. Everything is
 stored in a plain-text, org-like file you can edit by hand.
 
-The app is a **curses** terminal UI. `curses` ships with Python on
-Linux/macOS (no third-party packages at all); on Windows it needs the
-`windows-curses` shim. The UI-agnostic core (`model`, `view`, `report`) is
-kept separate so it can back other front-ends.
+The app is a **[Textual](https://textual.textualize.io/)** terminal UI. The
+UI-agnostic core (`model`, `view`, `report`, `config`, `calimport`,
+`notes`) is kept separate so it can back other front-ends.
 
-> A Textual front-end also exists but is **frozen / unmaintained** — see
-> [`legacy/`](legacy). New features go to the curses app only.
+> A dependency-free curses front-end also exists but is **frozen /
+> unmaintained** — see [`legacy/`](legacy). New features go to the Textual
+> app only.
 
 ## Setup
 
@@ -18,12 +18,6 @@ kept separate so it can back other front-ends.
 git clone https://github.com/kellyre/orgtime.git
 cd orgtime
 python -m venv venv
-```
-
-On Linux/macOS no dependencies are required. On Windows, install the curses
-shim once:
-
-```
 venv\Scripts\pip install -r requirements.txt
 ```
 
@@ -412,9 +406,9 @@ PYTHONPATH=. venv\Scripts\python tests\test_model.py
 PYTHONPATH=. venv\Scripts\python tests\test_view.py
 PYTHONPATH=. venv\Scripts\python tests\test_report.py
 PYTHONPATH=. venv\Scripts\python tests\test_overlap.py
-PYTHONPATH=. venv\Scripts\python tests\test_curses_headless.py
+PYTHONPATH=. venv\Scripts\python tests\test_textual_headless.py
 ```
 
-`test_curses_headless.py` drives the real curses UI (needs `windows-curses`
-on Windows). The frozen Textual test lives in `legacy/` and is not part of
-this suite.
+`test_textual_headless.py` drives the real Textual UI headlessly via
+`App.run_test()`. The frozen curses test lives in `legacy/` and is not part
+of this suite.

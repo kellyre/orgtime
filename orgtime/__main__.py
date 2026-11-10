@@ -1,10 +1,10 @@
 """Entry point: python -m orgtime [file]
 
-Launches the curses front-end (the maintained app). The frozen Textual
-version lives in legacy/ and is run with: python -m legacy.textual_app
+Launches the Textual front-end (the maintained app). The frozen curses
+version lives in legacy/ and is run with: python -m legacy.curses_app
 """
 
-from .curses_app import main
+from .textual_app import main
 
 if __name__ == "__main__":
     main()
